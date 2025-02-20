@@ -33,6 +33,7 @@ import type {
   V1APIResource,
   V1ConfigMap,
   V1ContainerState,
+  V1CronJob,
   V1Deployment,
   V1Ingress,
   V1NamespaceList,
@@ -47,6 +48,7 @@ import type {
   V1Status,
 } from '@kubernetes/client-node';
 import {
+  ApiException,
   ApisApi,
   AppsV1Api,
   BatchV1Api,
@@ -66,6 +68,7 @@ import { PromiseMiddlewareWrapper } from '@kubernetes/client-node/dist/gen/middl
 import type * as containerDesktopAPI from '@podman-desktop/api';
 import * as jsYaml from 'js-yaml';
 import type { WebSocket } from 'ws';
+import type { Tags } from 'yaml';
 import { parseAllDocuments } from 'yaml';
 
 import type { KubernetesPortForwardService } from '/@/plugin/kubernetes/kubernetes-port-forward-service.js';
@@ -77,6 +80,7 @@ import type { ContextGeneralState, ResourceName } from '/@api/kubernetes-context
 import type { ForwardConfig, ForwardOptions } from '/@api/kubernetes-port-forward-model.js';
 import type { ResourceCount } from '/@api/kubernetes-resource-count.js';
 import type { KubernetesContextResources } from '/@api/kubernetes-resources.js';
+import type { KubernetesTroubleshootingInformation } from '/@api/kubernetes-troubleshooting.js';
 import type { V1Route } from '/@api/openshift-types.js';
 
 import type { ApiSenderType } from '../api.js';
@@ -193,8 +197,7 @@ export class KubernetesClient {
 
   private kubeConfigWatcher: containerDesktopAPI.FileSystemWatcher | undefined;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private kubeWatcher: any | undefined;
+  private kubeWatcher: AbortController | undefined;
 
   private apiGroups = new Array<V1APIGroup>();
 
@@ -503,10 +506,8 @@ export class KubernetesClient {
         const projects = await ctx
           .makeApiClient(CustomObjectsApi)
           .listClusterCustomObject({ group: OPENSHIFT_PROJECT_API_GROUP, version: 'v1', plural: 'projects' });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((projects?.body as any)?.items.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          namespace = (projects?.body as any)?.items[0].metadata?.name;
+        if (projects?.body?.items.length > 0) {
+          namespace = projects?.body?.items[0].metadata?.name;
         }
       }
     } catch (err) {
@@ -750,6 +751,24 @@ export class KubernetesClient {
     }
   }
 
+  async deleteCronJob(name: string): Promise<void> {
+    let telemetryOptions = {};
+    try {
+      const namespace = this.getCurrentNamespace();
+      // Delete only if there is a valid connection
+      const connected = await this.checkConnection();
+      if (namespace && connected) {
+        const k8sApi = this.kubeConfig.makeApiClient(BatchV1Api);
+        await k8sApi.deleteNamespacedCronJob({ name, namespace });
+      }
+    } catch (error) {
+      telemetryOptions = { error: error };
+      throw this.wrapK8sClientError(error);
+    } finally {
+      this.telemetry.track('kubernetesDeleteCronJob', telemetryOptions);
+    }
+  }
+
   async deleteSecret(name: string): Promise<void> {
     let telemetryOptions = {};
     try {
@@ -982,6 +1001,20 @@ export class KubernetesClient {
     }
   }
 
+  async readNamespacedCronJob(name: string, namespace: string): Promise<V1CronJob | undefined> {
+    const k8sApi = this.kubeConfig.makeApiClient(BatchV1Api);
+    try {
+      const res = await k8sApi.readNamespacedCronJob({ name, namespace });
+      if (res?.metadata?.managedFields) {
+        delete res.metadata.managedFields;
+      }
+      return res;
+    } catch (error) {
+      this.telemetry.track('kubernetesReadNamespacedCronJob.error', error);
+      throw this.wrapK8sClientError(error);
+    }
+  }
+
   async listNamespaces(): Promise<V1NamespaceList> {
     try {
       const k8sApi = this.kubeConfig.makeApiClient(CoreV1Api);
@@ -1002,15 +1035,27 @@ export class KubernetesClient {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private wrapK8sClientError(e: any): Error {
-    if (e?.response?.body) {
-      if (e.response.body.message) {
+  private wrapK8sClientError(e: unknown): Error {
+    if (
+      e &&
+      e instanceof Error &&
+      'response' in e &&
+      e.response &&
+      typeof e.response === 'object' &&
+      'body' in e.response &&
+      e?.response?.body
+    ) {
+      if (
+        typeof e.response.body === 'object' &&
+        'message' in e.response.body &&
+        typeof e.response.body.message === 'string'
+      ) {
         return this.newError(e.response.body.message, e);
+      } else if (typeof e.response.body === 'string') {
+        return this.newError(e.response.body, e);
       }
-      return this.newError(e.response.body, e);
     }
-    return e;
+    return e instanceof Error ? e : new Error(`${e}`);
   }
 
   getKubeconfig(): containerDesktopAPI.Uri {
@@ -1028,14 +1073,12 @@ export class KubernetesClient {
     this.kubeConfigWatcher?.dispose();
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getTags(tags: any[]): any[] {
+  getTags(tags: Tags): Tags {
     for (const tag of tags) {
-      if (tag.tag === 'tag:yaml.org,2002:int') {
+      if (typeof tag === 'object' && 'tag' in tag && tag.tag === 'tag:yaml.org,2002:int') {
         const newTag = { ...tag };
         newTag.test = /^(0[0-7][0-7][0-7])$/;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        newTag.resolve = (str: any): number => parseInt(str, 8);
+        newTag.resolve = (str: string): number => parseInt(str, 8);
         tags.unshift(newTag);
         break;
       }
@@ -1044,7 +1087,6 @@ export class KubernetesClient {
   }
 
   // load yaml file and extract manifests
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async loadManifestsFromFile(file: string): Promise<KubernetesObject[]> {
     // throw exception if file does not exist
     if (!fs.existsSync(file)) {
@@ -1082,8 +1124,7 @@ export class KubernetesClient {
    * @param manifests the list of Kubernetes resources to create
    * @param namespace the namespace to use for any resources that don't include one
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async createResources(context: string, manifests: any[], namespace?: string): Promise<void> {
+  async createResources(context: string, manifests: unknown[], namespace?: string): Promise<void> {
     await this.syncResources(context, manifests, 'create', namespace);
   }
 
@@ -1169,7 +1210,7 @@ export class KubernetesClient {
    */
   async syncResources(
     context: string,
-    manifests: KubernetesObject[],
+    manifests: unknown[],
     action: 'create' | 'apply',
     namespace?: string,
   ): Promise<KubernetesObject[]> {
@@ -1185,8 +1226,9 @@ export class KubernetesClient {
       const ctx = new KubeConfig();
       ctx.loadFromFile(this.kubeconfigPath);
       ctx.currentContext = context;
-
-      const validSpecs = manifests.filter(s => s?.kind) as KubernetesObjectWithKind[];
+      const validSpecs = manifests.filter(
+        s => !!s && typeof s === 'object' && 'kind' in s,
+      ) as KubernetesObjectWithKind[];
 
       const client = ctx.makeApiClient(KubernetesObjectApi);
       const created: KubernetesObject[] = [];
@@ -1204,8 +1246,7 @@ export class KubernetesClient {
         try {
           // try to get the resource, if it does not exist an error will be thrown and we will
           // end up in the catch block
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await client.read(spec as any);
+          await client.read(spec);
           // we got the resource, so it exists: patch it
           //
           // Note that this could fail if the spec refers to a custom resource. For custom resources
@@ -1442,16 +1483,12 @@ export class KubernetesClient {
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (e) {
         const error = e ?? {};
-        if (typeof error === 'object' && 'response' in error) {
-          const axiosError = error as { response: { statusCode: number } };
-          if (axiosError.response.statusCode === 404) {
-            return true;
-          }
+        if (error instanceof ApiException && error.code === 404) {
+          return true;
         }
         throw e;
       }
     }
-
     return false;
   }
 
@@ -1584,11 +1621,8 @@ export class KubernetesClient {
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (e) {
         const error = e ?? {};
-        if (typeof error === 'object' && 'response' in error) {
-          const axiosError = error as { response: { statusCode: number } };
-          if (axiosError.response.statusCode === 404) {
-            return true;
-          }
+        if (error instanceof ApiException && error.code === 404) {
+          return true;
         }
         throw e;
       }
@@ -1701,12 +1735,21 @@ export class KubernetesClient {
     return this.contextsStatesDispatcher.getResourcesCount();
   }
 
-  public getResources(resourceName: string): KubernetesContextResources[] {
+  public getResources(contextNames: string[], resourceName: string): KubernetesContextResources[] {
     if (!this.contextsStatesDispatcher) {
       throw new Error(
         `contextsStatesDispatcher is undefined when getting ${resourceName}. This should not happen in Kubernetes experimental`,
       );
     }
-    return this.contextsStatesDispatcher.getResources(resourceName);
+    return this.contextsStatesDispatcher.getResources(contextNames, resourceName);
+  }
+
+  public getTroubleshootingInformation(): KubernetesTroubleshootingInformation {
+    if (!this.contextsStatesDispatcher) {
+      throw new Error(
+        `contextsStatesDispatcher is undefined when getting troubleshooting information. This should not happen in Kubernetes experimental`,
+      );
+    }
+    return this.contextsStatesDispatcher.getTroubleshootingInformation();
   }
 }

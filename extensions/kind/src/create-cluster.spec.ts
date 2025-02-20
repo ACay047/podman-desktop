@@ -16,6 +16,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
 
+import * as fs from 'node:fs';
+
 import type { AuditRecord, TelemetryLogger } from '@podman-desktop/api';
 import * as extensionApi from '@podman-desktop/api';
 import type { Mock } from 'vitest';
@@ -24,11 +26,20 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { connectionAuditor, createCluster, getKindClusterConfig } from './create-cluster';
 import { getMemTotalInfo } from './util';
 
+vi.mock('node:fs', () => ({
+  promises: {
+    writeFile: vi.fn(),
+    mkdtemp: vi.fn(),
+    rm: vi.fn(),
+  },
+}));
+
 vi.mock('@podman-desktop/api', async () => {
   return {
     Logger: {},
     kubernetes: {
       createResources: vi.fn(),
+      getKubeconfig: vi.fn().mockReturnValue({ path: '/some/path' }),
     },
     provider: {
       getContainerConnections: vi
@@ -50,6 +61,7 @@ vi.mock('./util', async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(fs.promises.mkdtemp).mockResolvedValue('/tmp/file');
 });
 
 const telemetryLogUsageMock = vi.fn();
@@ -84,6 +96,23 @@ test('expect cluster to be created', async () => {
   expect(extensionApi.kubernetes.createResources).not.toBeCalled();
 });
 
+test('expect cluster to be created using config file', async () => {
+  (extensionApi.process.exec as Mock).mockReturnValue({} as extensionApi.RunResult);
+  const logger = {
+    log: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  };
+  await createCluster({ 'kind.cluster.creation.configFile': '/path' }, '', telemetryLoggerMock, logger);
+  expect(telemetryLogUsageMock).toHaveBeenNthCalledWith(
+    1,
+    'createCluster',
+    expect.objectContaining({ provider: 'docker' }),
+  );
+  expect(telemetryLogErrorMock).not.toBeCalled();
+  expect(extensionApi.kubernetes.createResources).not.toBeCalled();
+});
+
 test('expect cluster to be created with ingress', async () => {
   (extensionApi.process.exec as Mock).mockReturnValue({} as extensionApi.RunResult);
   const logger = {
@@ -98,6 +127,80 @@ test('expect cluster to be created with ingress', async () => {
     expect.objectContaining({ provider: 'docker' }),
   );
   expect(extensionApi.kubernetes.createResources).toBeCalled();
+});
+
+test('expect cluster to be created with ports as strings', async () => {
+  (extensionApi.process.exec as Mock).mockReturnValue({} as extensionApi.RunResult);
+  const logger = {
+    log: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  };
+  await createCluster(
+    {
+      'kind.cluster.creation.http.port': '9091',
+      'kind.cluster.creation.https.port': '9444',
+    },
+    '',
+    telemetryLoggerMock,
+    logger,
+  );
+  expect(telemetryLogUsageMock).toHaveBeenNthCalledWith(
+    1,
+    'createCluster',
+    expect.objectContaining({
+      httpHostPort: 9091,
+      httpsHostPort: 9444,
+    }),
+  );
+  expect(fs.promises.writeFile).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.stringContaining(`
+  - containerPort: 80
+    hostPort: 9091
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 9444
+    protocol: TCP`),
+    expect.anything(),
+  );
+});
+
+test('expect cluster to be created with ports as numbers', async () => {
+  (extensionApi.process.exec as Mock).mockReturnValue({} as extensionApi.RunResult);
+  const logger = {
+    log: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+  };
+  await createCluster(
+    {
+      'kind.cluster.creation.http.port': 9091,
+      'kind.cluster.creation.https.port': 9444,
+    },
+    '',
+    telemetryLoggerMock,
+    logger,
+  );
+  expect(telemetryLogUsageMock).toHaveBeenNthCalledWith(
+    1,
+    'createCluster',
+    expect.objectContaining({
+      httpHostPort: 9091,
+      httpsHostPort: 9444,
+    }),
+  );
+  expect(fs.promises.writeFile).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.stringContaining(`
+  - containerPort: 80
+    hostPort: 9091
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 9444
+    protocol: TCP`),
+    expect.anything(),
+  );
 });
 
 test('expect error if Kubernetes reports error', async () => {
@@ -162,6 +265,16 @@ test('check that consilience check returns no warning messages', async () => {
 
 test('check that consilience check returns warning message when image has no sha256 digest', async () => {
   const checks = await connectionAuditor('docker', { 'kind.cluster.creation.controlPlaneImage': 'image:tag' });
+
+  expect(checks).toBeDefined();
+  expect(checks).toHaveProperty('records');
+  expect(checks.records.length).toBe(1);
+  expect(checks.records[0]).toHaveProperty('type');
+  expect(checks.records[0].type).toBe('warning');
+});
+
+test('check that consilience check returns warning message when config file is specified', async () => {
+  const checks = await connectionAuditor('docker', { 'kind.cluster.creation.configFile': '/path' });
 
   expect(checks).toBeDefined();
   expect(checks).toHaveProperty('records');

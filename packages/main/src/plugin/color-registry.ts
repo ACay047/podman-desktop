@@ -18,7 +18,7 @@
 
 import type * as extensionApi from '@podman-desktop/api';
 
-import type { AnalyzedExtension } from '/@/plugin/extension/extension-loader.js';
+import type { AnalyzedExtension } from '/@/plugin/extension/extension-analyzer.js';
 import type { ColorDefinition, ColorInfo } from '/@api/color-info.js';
 import type { RawThemeContribution } from '/@api/theme-info.js';
 
@@ -1172,6 +1172,42 @@ export class ColorRegistry {
     this.registerColor(`${label}text`, {
       dark: colorPalette.gray[500],
       light: colorPalette.charcoal[300],
+    });
+
+    this.registerColor(`${label}primary-bg`, {
+      dark: colorPalette.purple[700],
+      light: colorPalette.purple[300],
+    });
+    this.registerColor(`${label}primary-text`, {
+      dark: colorPalette.purple[300],
+      light: colorPalette.purple[700],
+    });
+
+    this.registerColor(`${label}secondary-bg`, {
+      dark: colorPalette.sky[900],
+      light: colorPalette.sky[200],
+    });
+    this.registerColor(`${label}secondary-text`, {
+      dark: colorPalette.sky[200],
+      light: colorPalette.sky[900],
+    });
+
+    this.registerColor(`${label}tertiary-bg`, {
+      dark: colorPalette.green[900],
+      light: colorPalette.green[200],
+    });
+    this.registerColor(`${label}tertiary-text`, {
+      dark: colorPalette.green[200],
+      light: colorPalette.green[900],
+    });
+
+    this.registerColor(`${label}quaternary-bg`, {
+      dark: colorPalette.amber[800],
+      light: colorPalette.amber[100],
+    });
+    this.registerColor(`${label}quaternary-text`, {
+      dark: colorPalette.amber[400],
+      light: colorPalette.amber[900],
     });
   }
 

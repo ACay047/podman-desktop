@@ -21,7 +21,6 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 
-import * as clientNode from '@kubernetes/client-node';
 import {
   type AppsV1Api,
   BatchV1Api,
@@ -30,6 +29,7 @@ import {
   KubeConfig,
   type KubernetesObject,
   type V1ConfigMap,
+  type V1CronJob,
   type V1Deployment,
   type V1Ingress,
   type V1Job,
@@ -42,6 +42,7 @@ import {
   type V1Status,
   type Watch,
 } from '@kubernetes/client-node';
+import * as clientNode from '@kubernetes/client-node';
 import type { FileSystemWatcher } from '@podman-desktop/api';
 import { beforeAll, beforeEach, describe, expect, type Mock, test, vi } from 'vitest';
 
@@ -282,8 +283,11 @@ vi.mock('/@/plugin/kubernetes/kubernetes-port-forward-service', async () => {
 
 const execMock = vi.fn();
 beforeAll(() => {
-  vi.mock('@kubernetes/client-node', async () => {
+  vi.mock('@kubernetes/client-node', async importOriginal => {
+    const original = await importOriginal<typeof clientNode>();
     return {
+      // we need to use original ApiException
+      ...original,
       KubeConfig: vi.fn(),
       CoreV1Api: {},
       AppsV1Api: {},
@@ -513,11 +517,10 @@ test('test that blank kubeconfig path will be set to default one', async () => {
 test('kube watcher', () => {
   const client = createTestClient('fooNS');
   const path: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let errorHandler: any;
+  let errorHandler: ((args: unknown[]) => void) | undefined;
 
   // mock TestKubernetesClient.createWatchObject
-  const watchMethodMock = vi.fn().mockImplementation((pathMethod, _ignore1, _ignore2, c) => {
+  const watchMethodMock = vi.fn().mockImplementation((pathMethod, _ignore1, _ignore2, c: (args: unknown[]) => void) => {
     path.push(pathMethod);
     errorHandler = c;
     return Promise.resolve();
@@ -535,7 +538,7 @@ test('kube watcher', () => {
 
   // call the error Handler with undefined
   if (errorHandler !== undefined) {
-    errorHandler(undefined);
+    errorHandler([undefined]);
   }
 
   expect(createWatchObjectSpy).toBeCalled();
@@ -549,10 +552,9 @@ test('should throw error if cannot call the cluster (readNamespacedDeployment re
 
   try {
     await client.readNamespacedDeployment('deployment', 'default');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
+  } catch (err: unknown) {
     expect(err).to.be.a('Error');
-    expect(err.message).equal('K8sError');
+    expect((err as Error).message).equal('K8sError');
   }
 });
 
@@ -593,10 +595,9 @@ test('should throw error if cannot call the cluster (readNamespacedIngress rejec
 
   try {
     await client.readNamespacedIngress('ingress', 'default');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
+  } catch (err: unknown) {
     expect(err).to.be.a('Error');
-    expect(err.message).equal('K8sError');
+    expect((err as Error).message).equal('K8sError');
   }
 });
 
@@ -704,10 +705,9 @@ test('should throw error if cannot call the cluster (getNamespacedCustomObject r
 
   try {
     await client.readNamespacedRoute('route', 'default');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
+  } catch (err: unknown) {
     expect(err).to.be.a('Error');
-    expect(err.message).equal('K8sError');
+    expect((err as Error).message).equal('K8sError');
   }
 });
 
@@ -839,10 +839,9 @@ test('should throw error if cannot call the cluster (readNamespacedService rejec
 
   try {
     await client.readNamespacedService('service', 'default');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
+  } catch (err: unknown) {
     expect(err).to.be.a('Error');
-    expect(err.message).equal('K8sError');
+    expect((err as Error).message).equal('K8sError');
   }
 });
 
@@ -1015,12 +1014,11 @@ test('If Kubernetes returns a http error, output the http body message error.', 
 
   try {
     await client.createResources('dummy', [{ apiVersion: 'v1' }]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.log(err);
     // Check that the error is clientNode.HttpError
     expect(err).to.be.a('Error');
-    expect(err.message).contain('A K8sError within message body');
+    expect((err as Error).message).contain('A K8sError within message body');
   }
 });
 
@@ -1651,7 +1649,9 @@ test('Should return true if the job is deleted within the timeout', async () => 
   const namespace = 'test-namespace';
   const jobName = 'test-job';
 
-  batchApiMock.readNamespacedJobStatus = vi.fn().mockRejectedValueOnce({ response: { statusCode: 404 } });
+  batchApiMock.readNamespacedJobStatus = vi
+    .fn()
+    .mockRejectedValueOnce(new clientNode.ApiException(404, 'a message', {}, {}));
 
   const result = await client.testWaitForJobDeletion(batchApiMock, namespace, jobName);
   expect(result).toBe(true);
@@ -1702,7 +1702,7 @@ test('Should throw an exception if a read namespaced job status API call returns
   const namespace = 'test-namespace';
   const jobName = 'test-job';
 
-  const errorResponse = { response: { statusCode: 500 } };
+  const errorResponse = new clientNode.ApiException(500, 'a message', {}, {});
   batchApiMock.readNamespacedJobStatus = vi.fn().mockRejectedValue(errorResponse);
 
   await expect(client.testWaitForJobDeletion(batchApiMock, namespace, jobName)).rejects.toThrow(
@@ -2032,7 +2032,9 @@ test('Should return true if the pod is successfully deleted', async () => {
   const namespace = 'default';
   const podName = 'test-pod';
 
-  (coreApiMock.readNamespacedPodStatus as Mock).mockRejectedValueOnce({ response: { statusCode: 404 } });
+  (coreApiMock.readNamespacedPodStatus as Mock).mockRejectedValueOnce(
+    new clientNode.ApiException(404, 'a message', {}, {}),
+  );
 
   const result = await client.testWaitForPodDeletion(coreApiMock as CoreV1Api, podName, namespace);
 
@@ -2086,7 +2088,7 @@ test('Should throw an error if an unexpected error occurs and it differs than 40
   const namespace = 'default';
   const podName = 'test-pod';
 
-  const errorResponse = { response: { statusCode: 500 } };
+  const errorResponse = new clientNode.ApiException(500, 'a message', {}, {});
   (coreApiMock.readNamespacedPodStatus as Mock).mockRejectedValueOnce(errorResponse);
 
   await expect(client.testWaitForPodDeletion(coreApiMock as CoreV1Api, podName, namespace)).rejects.toThrow(
@@ -2407,4 +2409,46 @@ describe('port forward', () => {
 
     expect(serviceMock.deleteForward).toHaveBeenCalledWith(DUMMY_FORWARD_CONFIG);
   });
+});
+
+test('Expect deleteCronJob to not be called if there is no active connection', async () => {
+  const client = createTestClient('default');
+  const deleteCronJobMock = vi.fn();
+  vi.spyOn(client, 'checkConnection').mockResolvedValue(false);
+  makeApiClientMock.mockReturnValue({
+    deleteNamespacedCronJob: deleteCronJobMock,
+  });
+
+  await client.deleteCronJob('name');
+  expect(deleteCronJobMock).not.toBeCalled();
+});
+
+test('Expect deleteCronJob to be called if there IS an active connection', async () => {
+  const client = createTestClient('default');
+  const deleteCronJobMock = vi.fn();
+  makeApiClientMock.mockReturnValue({
+    deleteNamespacedCronJob: deleteCronJobMock,
+  });
+  vi.spyOn(client, 'checkConnection').mockResolvedValue(true);
+  await client.deleteCronJob('name');
+  expect(deleteCronJobMock).toBeCalled();
+});
+
+test('Expect readNamespacedCronJob to return the cronjob', async () => {
+  const client = createTestClient('default');
+  const v1CronJob: V1CronJob = {
+    apiVersion: 'batch/v1',
+    kind: 'CronJob',
+    metadata: {
+      name: 'foobar',
+    },
+  };
+  makeApiClientMock.mockReturnValue({
+    readNamespacedCronJob: () => Promise.resolve(v1CronJob),
+  });
+
+  // We expect to get the correct cronjob back (name = foobar)
+  const cronjob = await client.readNamespacedCronJob('foobar', 'default');
+  expect(cronjob).toBeDefined();
+  expect(cronjob?.metadata?.name).toEqual('foobar');
 });

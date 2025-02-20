@@ -1,6 +1,7 @@
 <script lang="ts">
-import { faCircle, faPlusCircle } from '@fortawesome/free-solid-svg-icons';
+import { faCircle, faPlusCircle, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { Checkbox, isFontAwesomeIcon, Tooltip } from '@podman-desktop/ui-svelte';
+import type { Component } from 'svelte';
 import { createEventDispatcher, onMount, tick } from 'svelte';
 import Fa from 'svelte-fa';
 
@@ -9,8 +10,7 @@ export let badge: string = '';
 export let isDefault: boolean = false;
 export let checked: boolean = false;
 export let value: string = '';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export let icon: any | undefined = '';
+export let icon: IconDefinition | Component | undefined = undefined;
 let iconType: 'fontAwesome' | 'unknown' | undefined = undefined;
 
 export let additionalItem: boolean = false;
@@ -118,17 +118,19 @@ onMount(() => {
       {#if displayValueFieldInput}
         <input
           type="text"
-          class="w-40 outline-none bg-[var(--pd-input-field-bg)] focus:bg-[var(--pd-input-field-focused-bg)] rounded-xs text-[var(--pd-content-text)]"
+          class="w-40 outline-hidden bg-[var(--pd-input-field-bg)] focus:bg-[var(--pd-input-field-focused-bg)] rounded-xs text-[var(--pd-content-text)]"
           bind:value={additionalValue}
           bind:this={inputHtmlElement}
           on:keydown={handleKeydownAdditionalField} />
       {/if}
     </div>
     <div class="flex grow justify-end">
-      {#if iconType === 'fontAwesome'}
-        <Fa class="text-[var(--pd-content-card-icon)] cursor-pointer" icon={icon} size="1.5x" />
-      {:else if iconType === 'unknown'}
-        <svelte:component this={icon} class="text-[var(--pd-content-card-icon)] cursor-pointer" size="24" />
+      {#if icon}
+        {#if iconType === 'fontAwesome'}
+          <Fa class="text-[var(--pd-content-card-icon)] cursor-pointer" icon={icon as IconDefinition} size="1.5x" />
+        {:else if iconType === 'unknown'}
+          <svelte:component this={icon as Component} class="text-[var(--pd-content-card-icon)] cursor-pointer" size="24" />
+        {/if}
       {/if}
     </div>
   </div>

@@ -6,9 +6,11 @@ import { router } from 'tinro';
 
 import { handleNavigation } from '/@/navigation';
 import { NO_CURRENT_CONTEXT_ERROR } from '/@api/kubernetes-contexts-states';
+import type { KubernetesNavigationRequest } from '/@api/kubernetes-navigation';
 import type { NavigationRequest } from '/@api/navigation-request';
 
 import AppNavigation from './AppNavigation.svelte';
+import { navigateTo } from './kubernetesNavigation';
 import Appearance from './lib/appearance/Appearance.svelte';
 import ComposeDetails from './lib/compose/ComposeDetails.svelte';
 import ConfigMapDetails from './lib/configmaps-secrets/ConfigMapDetails.svelte';
@@ -18,6 +20,8 @@ import ContainerDetails from './lib/container/ContainerDetails.svelte';
 import ContainerExport from './lib/container/ContainerExport.svelte';
 import ContainerList from './lib/container/ContainerList.svelte';
 import ContextKey from './lib/context/ContextKey.svelte';
+import CronJobDetails from './lib/cronjob/CronJobDetails.svelte';
+import CronJobList from './lib/cronjob/CronJobList.svelte';
 import DashboardPage from './lib/dashboard/DashboardPage.svelte';
 import DeploymentDetails from './lib/deployments/DeploymentDetails.svelte';
 import DeploymentsList from './lib/deployments/DeploymentsList.svelte';
@@ -43,6 +47,8 @@ import IngressesRoutesList from './lib/ingresses-routes/IngressesRoutesList.svel
 import RouteDetails from './lib/ingresses-routes/RouteDetails.svelte';
 import KubePlayYAML from './lib/kube/KubePlayYAML.svelte';
 import KubernetesDashboard from './lib/kube/KubernetesDashboard.svelte';
+import KubePodDetails from './lib/kube/pods/PodDetails.svelte';
+import KubePodsList from './lib/kube/pods/PodsList.svelte';
 import PortForwardingList from './lib/kubernetes-port-forward/PortForwardingList.svelte';
 import ManifestDetails from './lib/manifest/ManifestDetails.svelte';
 import NodeDetails from './lib/node/NodeDetails.svelte';
@@ -102,6 +108,10 @@ window.events?.receive('show-release-notes', () => {
 window.events?.receive('navigate', (navigationRequest: unknown) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handleNavigation(navigationRequest as NavigationRequest<any>);
+});
+
+window.events?.receive('kubernetes-navigation', (args: unknown) => {
+  navigateTo(args as KubernetesNavigationRequest);
 });
 </script>
 
@@ -257,6 +267,16 @@ window.events?.receive('navigate', (navigationRequest: unknown) => {
           <Route path="/kubernetes/nodes/:name/*" breadcrumb="Node Details" let:meta navigationHint="details">
             <NodeDetails name={decodeURI(meta.params.name)} />
           </Route>
+          <Route path="/kubernetes/pods" breadcrumb="Pods" navigationHint="root">
+            <KubePodsList />
+          </Route>
+          <Route
+            path="/kubernetes/pods/:name/:namespace/*"
+            breadcrumb="Pod Details"
+            let:meta
+            navigationHint="details">
+            <KubePodDetails name={decodeURI(meta.params.name)} namespace={decodeURI(meta.params.namespace)} />
+          </Route>
           <Route path="/kubernetes/persistentvolumeclaims" breadcrumb="Persistent Volume Claims" navigationHint="root">
             <PVCList />
           </Route>
@@ -289,6 +309,12 @@ window.events?.receive('navigate', (navigationRequest: unknown) => {
           </Route>
           <Route path="/kubernetes/ingressesRoutes" breadcrumb="Ingresses & Routes" navigationHint="root">
             <IngressesRoutesList />
+          </Route>
+          <Route path="/kubernetes/cronjobs" breadcrumb="CronJobs" navigationHint="root">
+            <CronJobList />
+          </Route>
+          <Route path="/kubernetes/cronjobs/:name/:namespace/*" breadcrumb="CronJob Details" let:meta navigationHint="details">
+            <CronJobDetails name={decodeURI(meta.params.name)} namespace={decodeURI(meta.params.namespace)} />
           </Route>
           <Route
             path="/kubernetes/ingressesRoutes/ingress/:name/:namespace/*"

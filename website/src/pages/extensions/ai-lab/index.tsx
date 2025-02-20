@@ -89,14 +89,14 @@ export default function Home(): JSX.Element {
             {/* buttons section */}
             <div className="mt-4 flex justify-center items-center gap-x-4">
               <Link
-                className="items-center mt-auto no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 focus:outline-none hover:bg-purple-500 rounded-xl text-md font-semibold"
+                className="items-center mt-auto no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 focus:outline-hidden hover:bg-purple-500 rounded-xl text-md font-semibold"
                 to={'/docs/ai-lab/installing'}>
                 <FontAwesomeIcon size="1x" icon={faRocket} className="mr-2" />
                 Get started
               </Link>
 
               <Link
-                className="items-center mt-auto no-underline hover:no-underline inline-flex text-charcoal-500 dark:text-white border-0 py-2 px-6 focus:outline-none text-md font-semibold"
+                className="items-center mt-auto no-underline hover:no-underline inline-flex text-charcoal-500 dark:text-white border-0 py-2 px-6 focus:outline-hidden text-md font-semibold"
                 to={'https://github.com/containers/podman-desktop-extension-ai-lab'}>
                 Learn more on GitHub
                 <FontAwesomeIcon size="1x" icon={faArrowRight} className="ml-2" />
@@ -104,7 +104,7 @@ export default function Home(): JSX.Element {
             </div>
 
             {/* Application video */}
-            <div className="my-12 rounded-xl from-purple-500 bg-gradient-to-r to-fuschia-500">
+            <div className="my-12 rounded-xl from-purple-500 bg-linear-to-r to-fuschia-500">
               <div className="p-8">
                 <video className="rounded-xl w-full h-full" controls>
                   <source
@@ -128,7 +128,7 @@ export default function Home(): JSX.Element {
             <div className="w-full grid grid-cols-2 gap-2 lg:grid-cols-2">
               {RECIPES.map(recipe => (
                 <div
-                  className="px-8 py-4 rounded-xl from-purple-500 from-70% bg-gradient-to-t to-white flex flex-col grow items-center text-black text-center"
+                  className="px-8 py-4 rounded-xl flex flex-col grow items-center text-black text-center"
                   style={{
                     background: getGradient(recipe.colorFrom, recipe.colorTo),
                     border: `1px solid ${recipe.colorFrom}`,

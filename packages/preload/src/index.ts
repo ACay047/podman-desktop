@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2022-2024 Red Hat, Inc.
+ * Copyright (C) 2022-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import type {
   Context,
   KubernetesObject,
   V1ConfigMap,
+  V1CronJob,
   V1Deployment,
   V1Ingress,
   V1NamespaceList,
@@ -74,6 +75,7 @@ import type { ContextGeneralState, ResourceName } from '/@api/kubernetes-context
 import type { ForwardConfig, ForwardOptions } from '/@api/kubernetes-port-forward-model';
 import type { ResourceCount } from '/@api/kubernetes-resource-count';
 import type { KubernetesContextResources } from '/@api/kubernetes-resources';
+import type { KubernetesTroubleshootingInformation } from '/@api/kubernetes-troubleshooting';
 import type { ManifestCreateOptions, ManifestInspectInfo, ManifestPushOptions } from '/@api/manifest-info';
 import type { NetworkInspectInfo } from '/@api/network-info';
 import type { NotificationCard, NotificationCardOptions } from '/@api/notification';
@@ -126,12 +128,9 @@ const originalConsole = console;
 const memoryLogs: { logType: LogType; date: Date; message: string }[] = [];
 
 export interface KeyLogger {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  log(key: symbol, ...data: any[]): void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  error(key: symbol, ...data: any[]): void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  warn(key: symbol, ...data: any[]): void;
+  log(key: symbol, ...data: unknown[]): void;
+  error(key: symbol, ...data: unknown[]): void;
+  warn(key: symbol, ...data: unknown[]): void;
 }
 
 export const buildApiSender = (): ApiSenderType => {
@@ -159,8 +158,7 @@ export function initExposure(): void {
   interface ErrorMessage {
     name: string;
     message: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    extra: any;
+    extra: unknown;
   }
 
   function decodeError(error: ErrorMessage): Error {
@@ -170,8 +168,7 @@ export function initExposure(): void {
     return e;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async function ipcInvoke(channel: string, ...args: any): Promise<any> {
+  async function ipcInvoke<T>(channel: string, ...args: unknown[]): Promise<T> {
     const { error, result } = await ipcRenderer.invoke(channel, ...args);
     if (error) {
       throw decodeError(error);
@@ -187,10 +184,8 @@ export function initExposure(): void {
   // keep console log data
   const types: LogType[] = ['log', 'warn', 'trace', 'debug', 'error'];
   types.forEach(logType => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const originalFunction = (originalConsole as any)[logType];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (console as any)[logType] = (...args: unknown[]): void => {
+    const originalFunction = originalConsole[logType];
+    console[logType] = (...args: unknown[]): void => {
       originalFunction(...args);
       memoryLogs.push({ logType: logType, date: new Date(), message: args.join(' ') });
     };
@@ -249,6 +244,10 @@ export function initExposure(): void {
       return ipcRenderer.invoke('navigation:sendNavigationItems', items);
     },
   );
+
+  contextBridge.exposeInMainWorld('navigateToRoute', async (routeId: string, ...args: unknown[]): Promise<void> => {
+    return ipcRenderer.invoke('navigation:navigateToRoute', routeId, ...args);
+  });
 
   contextBridge.exposeInMainWorld('listContainers', async (): Promise<ContainerInfo[]> => {
     return ipcInvoke('container-provider-registry:listContainers');
@@ -874,7 +873,7 @@ export function initExposure(): void {
   let checkCallbackId = 0;
   contextBridge.exposeInMainWorld(
     'runInstallPreflightChecks',
-    async (providerId: string, callBack: PreflightChecksCallback) => {
+    async (providerId: string, callBack: PreflightChecksCallback): Promise<boolean> => {
       checkCallbackId++;
       preflightChecksCallbacks.set(checkCallbackId, callBack);
       return await ipcInvoke('provider-registry:runInstallPreflightChecks', providerId, checkCallbackId);
@@ -897,7 +896,7 @@ export function initExposure(): void {
 
   contextBridge.exposeInMainWorld(
     'runUpdatePreflightChecks',
-    async (providerId: string, callBack: PreflightChecksCallback) => {
+    async (providerId: string, callBack: PreflightChecksCallback): Promise<boolean> => {
       checkCallbackId++;
       preflightChecksCallbacks.set(checkCallbackId, callBack);
       return await ipcInvoke('provider-registry:runUpdatePreflightChecks', providerId, checkCallbackId);
@@ -951,8 +950,7 @@ export function initExposure(): void {
     'createContainerProviderConnection',
     async (
       internalProviderId: string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      params: { [key: string]: any },
+      params: { [key: string]: unknown },
       key: symbol,
       keyLogger: (key: symbol, eventName: 'log' | 'warn' | 'error' | 'finish', args: string[]) => void,
       tokenId: number | undefined,
@@ -986,8 +984,7 @@ export function initExposure(): void {
     'createKubernetesProviderConnection',
     async (
       internalProviderId: string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      params: { [key: string]: any },
+      params: { [key: string]: unknown },
       key: symbol,
       keyLogger: (key: symbol, eventName: 'log' | 'warn' | 'error' | 'finish', args: string[]) => void,
       tokenId: number | undefined,
@@ -1155,8 +1152,7 @@ export function initExposure(): void {
     async (
       providerId: string,
       providerConnectionInfo: ProviderContainerConnectionInfo | ProviderKubernetesConnectionInfo,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      params: { [key: string]: any },
+      params: { [key: string]: unknown },
       key: symbol,
       keyLogger: (key: symbol, eventName: 'log' | 'warn' | 'error' | 'finish', args: string[]) => void,
       tokenId: number | undefined,
@@ -1251,8 +1247,7 @@ export function initExposure(): void {
 
   contextBridge.exposeInMainWorld(
     'executeStatusBarEntryCommand',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async (command: string, args: any[]): Promise<void> => {
+    async (command: string, args: unknown[]): Promise<void> => {
       return ipcInvoke('status-bar:executeStatusBarEntryCommand', command, args);
     },
   );
@@ -1489,8 +1484,7 @@ export function initExposure(): void {
     'updateConfigurationValue',
     async (
       key: string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      value: any,
+      value: unknown,
       scope?: containerDesktopAPI.ConfigurationScope | containerDesktopAPI.ConfigurationScope[],
     ): Promise<void> => {
       return ipcInvoke('configuration-registry:updateConfigurationValue', key, value, scope);
@@ -1890,8 +1884,8 @@ export function initExposure(): void {
 
   contextBridge.exposeInMainWorld(
     'kubernetesGetResources',
-    async (resourceName: string): Promise<KubernetesContextResources[]> => {
-      return ipcInvoke('kubernetes:getResources', resourceName);
+    async (contextNames: string[], resourceName: string): Promise<KubernetesContextResources[]> => {
+      return ipcInvoke('kubernetes:getResources', contextNames, resourceName);
     },
   );
 
@@ -1968,6 +1962,13 @@ export function initExposure(): void {
     },
   );
 
+  contextBridge.exposeInMainWorld(
+    'kubernetesReadNamespacedCronJob',
+    async (name: string, namespace: string): Promise<V1CronJob | undefined> => {
+      return ipcInvoke('kubernetes-client:readNamespacedCronJob', name, namespace);
+    },
+  );
+
   contextBridge.exposeInMainWorld('kubernetesIsAPIGroupSupported', async (group: string): Promise<boolean> => {
     return ipcInvoke('kubernetes-client:isAPIGroupSupported', group);
   });
@@ -2032,6 +2033,10 @@ export function initExposure(): void {
 
   contextBridge.exposeInMainWorld('kubernetesDeleteSecret', async (name: string): Promise<void> => {
     return ipcInvoke('kubernetes-client:deleteSecret', name);
+  });
+
+  contextBridge.exposeInMainWorld('kubernetesDeleteCronJob', async (name: string): Promise<void> => {
+    return ipcInvoke('kubernetes-client:deleteCronJob', name);
   });
 
   contextBridge.exposeInMainWorld('kubernetesDeletePersistentVolumeClaim', async (name: string): Promise<void> => {
@@ -2206,8 +2211,7 @@ export function initExposure(): void {
     return ipcInvoke('feedback:GitHubPreview', feedback);
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  contextBridge.exposeInMainWorld('telemetryTrack', async (event: string, eventProperties?: any): Promise<void> => {
+  contextBridge.exposeInMainWorld('telemetryTrack', async (event: string, eventProperties?: unknown): Promise<void> => {
     return ipcInvoke('telemetry:track', event, eventProperties);
   });
 
@@ -2230,6 +2234,7 @@ export function initExposure(): void {
       imageName: string,
       logCallback: (data: string) => void,
       errorCallback: (data: string) => void,
+      catalogExtensionId?: string,
     ): Promise<void> => {
       onDataCallbacksShellInContainerExtensionInstallId++;
       onDataCallbacksShellInContainerExtension.set(onDataCallbacksShellInContainerExtensionInstallId, logCallback);
@@ -2241,6 +2246,7 @@ export function initExposure(): void {
         'extension-installer:install-from-image',
         imageName,
         onDataCallbacksShellInContainerExtensionInstallId,
+        catalogExtensionId,
       );
 
       return new Promise(resolve => {
@@ -2407,6 +2413,13 @@ export function initExposure(): void {
   contextBridge.exposeInMainWorld('trackExtensionFolder', async (path: string): Promise<void> => {
     return ipcInvoke('extension-development-folders:addDevelopmentFolder', path);
   });
+
+  contextBridge.exposeInMainWorld(
+    'kubernetesGetTroubleshootingInformation',
+    async (): Promise<KubernetesTroubleshootingInformation> => {
+      return ipcInvoke('kubernetes:getTroubleshootingInformation');
+    },
+  );
 }
 
 // expose methods
