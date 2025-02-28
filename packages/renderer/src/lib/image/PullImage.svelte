@@ -1,11 +1,12 @@
 <script lang="ts">
 import { faArrowCircleDown, faCog, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
-import { Button, Checkbox, Dropdown, ErrorMessage, Tooltip } from '@podman-desktop/ui-svelte';
+import { Button, Checkbox, ErrorMessage, Tooltip } from '@podman-desktop/ui-svelte';
 import type { Terminal } from '@xterm/xterm';
 import { onMount, tick } from 'svelte';
 import Fa from 'svelte-fa';
 import { router } from 'tinro';
 
+import ContainerConnectionDropdown from '/@/lib/forms/ContainerConnectionDropdown.svelte';
 import type { ImageSearchOptions } from '/@api/image-registry';
 import type { ProviderContainerConnectionInfo } from '/@api/provider-info';
 import type { PullEvent } from '/@api/pull-event';
@@ -13,6 +14,7 @@ import type { PullEvent } from '/@api/pull-event';
 import { providerInfos } from '../../stores/providers';
 import EngineFormPage from '../ui/EngineFormPage.svelte';
 import TerminalWindow from '../ui/TerminalWindow.svelte';
+import type { TypeaheadItem } from '../ui/Typeahead';
 import Typeahead from '../ui/Typeahead.svelte';
 import WarningMessage from '../ui/WarningMessage.svelte';
 import RecommendedRegistry from './RecommendedRegistry.svelte';
@@ -28,7 +30,8 @@ let shortnameImages: string[] = [];
 let podmanFQN = '';
 let usePodmanFQN = false;
 let isValidName = true;
-let searchResult: string[] = [];
+let searchResult: TypeaheadItem[] = [];
+let sortResults: ((a: string, b: string) => number) | undefined;
 
 export let imageToPull: string | undefined = undefined;
 
@@ -249,7 +252,8 @@ function checkIfTagExist(image: string, tags: string[]): void {
 
 async function searchFunction(value: string): Promise<void> {
   try {
-    searchResult = (await searchImages(value)).toSorted((a: string, b: string) => {
+    const result = await searchImages(value);
+    sortResults = (a: string, b: string): number => {
       const dockerIoValue = `docker.io/${value}`;
       const aStartsWithValue = a.startsWith(value) || a.startsWith(dockerIoValue);
       const bStartsWithValue = b.startsWith(value) || b.startsWith(dockerIoValue);
@@ -260,9 +264,11 @@ async function searchFunction(value: string): Promise<void> {
       } else {
         return 1;
       }
-    });
+    };
+    searchResult = result.map(value => ({ value: value }));
   } catch (error: unknown) {
     searchResult = [];
+    sortResults = undefined;
   }
 }
 </script>
@@ -290,6 +296,7 @@ async function searchFunction(value: string): Promise<void> {
           placeholder="Image name"
           onInputChange={searchFunction}
           resultItems={searchResult}
+          compare={sortResults}
           onChange={async (s: string): Promise<void> => {
             validateImageName(s);
             await resolveShortname();
@@ -323,15 +330,11 @@ async function searchFunction(value: string): Promise<void> {
         <div class="pt-4">
           <label for="providerChoice" class="block mb-2 font-semibold text-[var(--pd-content-card-header-text)]"
             >Container Engine</label>
-          <Dropdown
+          <ContainerConnectionDropdown
             id="providerChoice"
             name="providerChoice"
             bind:value={selectedProviderConnection}
-            options={providerConnections.map(providerConnection => ({
-              label: providerConnection.name,
-              value: providerConnection,
-            }))}>
-          </Dropdown>
+            connections={providerConnections}/>
         </div>
       {/if}
       {#if providerConnections.length === 1}

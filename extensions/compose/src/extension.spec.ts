@@ -59,6 +59,9 @@ vi.mock('@podman-desktop/api', async () => {
     cli: {
       createCliTool: vi.fn(),
     },
+    window: {
+      showErrorMessage: vi.fn(),
+    },
   };
 });
 
@@ -424,11 +427,16 @@ describe('registerCLITool', () => {
     vi.mocked(detectMock.getStoragePath).mockResolvedValue('storage-path');
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
 
+    vi.mocked(extensionApi.process.exec).mockResolvedValue({
+      stdout: 'system-wide-path',
+    } as extensionApi.RunResult);
+
     let installer: extensionApi.CliToolInstaller | undefined;
     vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
       installer = mInstaller;
       return { dispose: vi.fn() };
     });
+    vi.mocked(extensionApi.env).isMac = true;
 
     await activate(extensionContextMock);
 
@@ -438,7 +446,8 @@ describe('registerCLITool', () => {
 
     await installer?.doUninstall({} as unknown as Logger);
     expect(fs.promises.unlink).toHaveBeenNthCalledWith(1, 'storage-path');
-    expect(fs.promises.unlink).toHaveBeenNthCalledWith(2, 'system-wide-path');
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('which', ['system-wide-path']);
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('rm', ['system-wide-path'], { isAdmin: true });
   });
 
   test('if unlink fails because of a permission issue, it should delete all binaries as admin', async () => {
@@ -454,7 +463,7 @@ describe('registerCLITool', () => {
     vi.mocked(fs.promises.unlink).mockRejectedValue({
       code: 'EACCES',
     } as unknown as Error);
-    const command = process.platform === 'win32' ? 'del' : 'rm';
+    vi.mocked(extensionApi.env).isMac = true;
 
     let installer: extensionApi.CliToolInstaller | undefined;
     vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
@@ -469,8 +478,7 @@ describe('registerCLITool', () => {
     });
 
     await installer?.doUninstall({} as unknown as Logger);
-    expect(extensionApi.process.exec).toHaveBeenNthCalledWith(1, command, ['storage-path'], { isAdmin: true });
-    expect(extensionApi.process.exec).toHaveBeenNthCalledWith(2, command, ['system-wide-path'], { isAdmin: true });
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('rm', ['storage-path'], { isAdmin: true });
   });
 
   test('verify that can install after uninstalling', async () => {
@@ -486,6 +494,10 @@ describe('registerCLITool', () => {
     vi.mocked(composeDownloadMock.promptUserForVersion).mockResolvedValue({
       tag: 'v1.0.0',
     } as unknown as ComposeGithubReleaseArtifactMetadata);
+    vi.mocked(extensionApi.process.exec).mockResolvedValue({
+      stdout: 'system-wide-path',
+    } as extensionApi.RunResult);
+    vi.mocked(extensionApi.env).isMac = true;
 
     let installer: extensionApi.CliToolInstaller | undefined;
     vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
@@ -500,8 +512,8 @@ describe('registerCLITool', () => {
     });
 
     await installer?.doUninstall({} as unknown as Logger);
-    expect(fs.promises.unlink).toHaveBeenNthCalledWith(1, 'storage-path');
-    expect(fs.promises.unlink).toHaveBeenNthCalledWith(2, 'system-wide-path');
+    expect(fs.promises.unlink).toHaveBeenCalledWith('storage-path');
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('rm', ['system-wide-path'], { isAdmin: true });
 
     await installer?.selectVersion();
 
@@ -515,5 +527,14 @@ describe('registerCLITool', () => {
       installationSource: 'extension',
       version: '1.0.0',
     });
+  });
+
+  test('onboarding download command shows error message if version list cannot be obtained', async () => {
+    await activate(extensionContextMock);
+    const downloadCommandHandler = vi.mocked(extensionApi.commands.registerCommand).mock.calls[2][1];
+    vi.mocked(composeDownloadMock.getLatestVersionAsset).mockRejectedValue(new Error('API call error'));
+    vi.mocked(extensionApi.window.showErrorMessage).mockResolvedValue(undefined);
+    await downloadCommandHandler();
+    expect(extensionApi.window.showErrorMessage).toHaveBeenCalledOnce();
   });
 });

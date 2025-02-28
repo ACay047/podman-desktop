@@ -1,16 +1,17 @@
 <script lang="ts">
 import { Button, Checkbox, ErrorMessage, Link } from '@podman-desktop/ui-svelte';
+import { onMount } from 'svelte';
 
 import FeedbackForm from '/@/lib/feedback/FeedbackForm.svelte';
 import type { FeedbackCategory, GitHubIssue } from '/@api/feedback';
 
 interface Props {
-  onCloseForm: () => void;
+  onCloseForm: (confirm: boolean) => void;
   category: FeedbackCategory;
   contentChange: (e: boolean) => void;
 }
 
-let { onCloseForm = (): void => {}, category = 'bug', contentChange }: Props = $props();
+let { onCloseForm, category = 'bug', contentChange }: Props = $props();
 
 let issueTitle = $state('');
 let issueDescription = $state('');
@@ -42,8 +43,12 @@ let existingIssuesLink = $state(
 
 $effect(() => contentChange(Boolean(issueTitle || issueDescription)));
 
+onMount(async () => {
+  await window.telemetryTrack(`feedback.FormOpened`, { feedbackCategory: category });
+});
+
 async function openGitHubIssues(): Promise<void> {
-  onCloseForm();
+  onCloseForm(false);
   await window.openExternal(existingIssuesLink);
 }
 
@@ -55,12 +60,22 @@ async function previewOnGitHub(): Promise<void> {
     includeSystemInfo: $state.snapshot(includeSystemInfo),
     includeExtensionInfo: $state.snapshot(includeExtensionInfo),
   };
-  try {
-    await window.previewOnGitHub(issueProperties);
-    onCloseForm();
-  } catch (error: unknown) {
-    console.error('There was a problem with preview on GitHub', error);
-  }
+  let telemetryEventProperties: { [property: string]: unknown } = { feedbackCategory: category };
+
+  window
+    .previewOnGitHub(issueProperties)
+    .then(() => {
+      onCloseForm(false);
+    })
+    .catch((error: unknown) => {
+      telemetryEventProperties['error'] = error;
+      console.error('There was a problem with preview on GitHub', error);
+    })
+    .finally(() => {
+      window
+        .telemetryTrack(`feedback.FormSubmitted`, telemetryEventProperties)
+        .catch((err: unknown) => console.error('Error sending feedback.formSubmitted telemetry', err));
+    });
 }
 </script>
 
@@ -76,7 +91,7 @@ async function previewOnGitHub(): Promise<void> {
       aria-label="Issue Title"
       bind:value={issueTitle}
       placeholder={titlePlaceholder}
-      class="w-full p-2 outline-none text-sm bg-[var(--pd-input-field-focused-bg)] rounded-sm text-[var(--pd-input-field-focused-text)] placeholder-[var(--pd-input-field-placeholder-text)]"/>
+      class="w-full p-2 outline-hidden text-sm bg-[var(--pd-input-field-focused-bg)] rounded-xs text-[var(--pd-input-field-focused-text)] placeholder-[var(--pd-input-field-placeholder-text)]"/>
 
     <!-- issue body -->
     <label for="issueDescription" class="block mt-4 mb-2 text-sm font-medium text-[var(--pd-modal-text)]"
@@ -88,7 +103,7 @@ async function previewOnGitHub(): Promise<void> {
       aria-label="Issue Description"
       id="issueDescription"
       bind:value={issueDescription}
-      class="w-full p-2 outline-none text-sm bg-[var(--pd-input-field-focused-bg)] rounded-sm text-[var(--pd-input-field-focused-text)] placeholder-[var(--pd-input-field-placeholder-text)]"
+      class="w-full p-2 outline-hidden text-sm bg-[var(--pd-input-field-focused-bg)] rounded-xs text-[var(--pd-input-field-focused-text)] placeholder-[var(--pd-input-field-placeholder-text)]"
       placeholder={descriptionPlaceholder}></textarea>
 
     <!-- additional form content for bug category -->
@@ -113,7 +128,7 @@ async function previewOnGitHub(): Promise<void> {
     {/if}
   </svelte:fragment>
   <svelte:fragment slot="buttons">
-    <Button class="underline" type="link" aria-label="Cancel" on:click={onCloseForm}>Cancel</Button>
+    <Button class="underline" type="link" aria-label="Cancel" on:click={(): void => onCloseForm(true)}>Cancel</Button>
     <Button aria-label="Preview on GitHub" on:click={previewOnGitHub} disabled={!issueTitle || !issueDescription}>Preview on GitHub</Button>
   </svelte:fragment>
 </FeedbackForm>

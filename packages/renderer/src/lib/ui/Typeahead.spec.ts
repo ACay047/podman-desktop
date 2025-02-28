@@ -22,6 +22,7 @@ import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { beforeEach, expect, test, vi } from 'vitest';
 
+import type { TypeaheadItem } from './Typeahead';
 import Typeahead from './Typeahead.svelte';
 
 window.HTMLElement.prototype.scrollIntoView = function (): void {};
@@ -84,16 +85,14 @@ test('initial focus is set with option', async () => {
 });
 
 test('should list the result after the delay, and display spinner during loading', async () => {
-  let searchResult: string[] = [];
+  let searchResult: TypeaheadItem[] = [];
   const searchFunction = async (s: string): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 100));
-    searchResult = [s + '01', s + '02', s + '03'];
+    searchResult = s ? [{ value: s + '01' }, { value: s + '02' }, { value: s + '03' }] : [];
   };
   const { rerender } = render(Typeahead, {
-    initialFocus: true,
     onInputChange: searchFunction,
     resultItems: searchResult,
-    sort: true,
     delay: 10,
   });
 
@@ -123,17 +122,15 @@ test('should list the result after the delay, and display spinner during loading
   within(list).getByText('aze03');
 });
 
-test('should list items started with search term on top', async () => {
-  let searchResult: string[] = [];
+test('should list items started with search term on top if no compare function is provided', async () => {
+  let searchResult: TypeaheadItem[] = [];
   const searchFunction = async (s: string): Promise<void> => {
     await new Promise(resolve => setTimeout(resolve, 100));
-    searchResult = ['z1' + s, s + '01', 'z0', s + '02', 'z2', s + '03'];
+    searchResult = s ? ['z1' + s, s + '01', 'z0', s + '02', 'z2', s + '03'].map(value => ({ value: value })) : [];
   };
   const { rerender } = render(Typeahead, {
-    initialFocus: true,
     onInputChange: searchFunction,
     resultItems: searchResult,
-    sort: true,
     delay: 10,
   });
 
@@ -155,20 +152,63 @@ test('should list items started with search term on top', async () => {
   });
 });
 
-test('should navigate in list with keys', async () => {
-  let searchResult: string[] = [];
-  const searchFunction = async (s: string): Promise<void> => {
-    const result: string[] = [];
-    for (let i = 1; i <= 15; i++) {
-      result.push(s + `${i}`.padStart(2, '0'));
+test('should list items in order based on compare function if provided', async () => {
+  const compareFunction = (a: string, b: string): number => {
+    if (a.startsWith('first') === b.startsWith('first')) {
+      return a.localeCompare(b);
+    } else if (a.startsWith('first') && !b.startsWith('first')) {
+      return -1;
+    } else {
+      return 1;
     }
-    searchResult = result;
   };
+
+  let searchResult: TypeaheadItem[] = [];
+  const searchFunction = async (s: string): Promise<void> => {
+    searchResult = s
+      ? ['first01', 'second01', 'first03', 'athird01', 'second02', 'first02'].map(value => ({
+          value: value,
+        }))
+      : [];
+  };
+
   const { rerender } = render(Typeahead, {
-    initialFocus: true,
     onInputChange: searchFunction,
     resultItems: searchResult,
-    sort: true,
+    delay: 10,
+    compare: compareFunction,
+  });
+
+  const input = screen.getByRole('textbox');
+  await userEvent.type(input, 'a');
+  await waitFor(() => expect(searchResult.length > 0).toBeTruthy());
+  await rerender({ resultItems: searchResult });
+  await tick();
+  await waitFor(() => {
+    const list = screen.getByRole('row');
+    const items = within(list).getAllByRole('button');
+    expect(items.length).toBe(6);
+    expect(items[0].textContent).toBe('first01');
+    expect(items[1].textContent).toBe('first02');
+    expect(items[2].textContent).toBe('first03');
+    expect(items[3].textContent).toBe('athird01');
+    expect(items[4].textContent).toBe('second01');
+    expect(items[5].textContent).toBe('second02');
+  });
+});
+
+test('should navigate in list with keys', async () => {
+  let searchResult: TypeaheadItem[] = [];
+  const searchFunction = async (s: string): Promise<void> => {
+    const result: TypeaheadItem[] = [];
+    for (let i = 1; i <= 15; i++) {
+      result.push({ value: s + `${i}`.padStart(2, '0') });
+    }
+    searchResult = s ? result : [];
+  };
+  const { rerender } = render(Typeahead, {
+    onInputChange: searchFunction,
+    resultItems: searchResult,
     delay: 10,
   });
   const input = screen.getByRole('textbox');
@@ -272,4 +312,87 @@ test('should show error border', async () => {
   expect(parentInput).toHaveClass('border-b-[var(--pd-input-field-stroke-error)]');
   expect(parentInput).toHaveClass('focus-within:border-[var(--pd-input-field-stroke-error)]');
   expect(parentInput).not.toHaveClass('hover:border-b-[var(--pd-input-field-hover-stroke)]');
+});
+
+test('should include heading based on given order and searchFunctions order', async () => {
+  let searchResult: TypeaheadItem[] = [];
+  const searchFunction = async (s: string): Promise<void> => {
+    const result1: TypeaheadItem[] = [s + '11', s + '12', s + '13', s + '14'].map(value => ({
+      value: value,
+      group: 'searchFunction1 results',
+    }));
+
+    const result2: TypeaheadItem[] = [s + '21', s + '22', s + '23', s + '24'].map(value => ({
+      value: value,
+      group: 'searchFunction2 results',
+    }));
+
+    const result3: TypeaheadItem[] = [s + '31', s + '32', s + '33'].map(value => ({
+      value: value,
+      group: 'searchFunction3 results',
+    }));
+
+    const result4: TypeaheadItem[] = [s + '41', s + '42', s + '43', s + '44'].map(value => ({ value: value }));
+
+    searchResult = s ? [...result1, ...result2, ...result3, ...result4] : [];
+  };
+
+  const { rerender } = render(Typeahead, {
+    onInputChange: searchFunction,
+    resultItems: searchResult,
+    delay: 10,
+  });
+
+  const input = screen.getByRole('textbox');
+
+  await userEvent.type(input, 'test');
+  await waitFor(() => expect(searchResult.length > 0).toBeTruthy());
+  await rerender({ resultItems: searchResult });
+
+  await tick();
+
+  await waitFor(() => {
+    const list = screen.getByRole('row');
+    const items = within(list).getAllByRole('button');
+    expect(items.length).toBe(18);
+    expect(items[0].textContent).toBe('searchFunction1 results');
+    expect(items[0]).toBeDisabled();
+    expect(items[1].textContent).toBe('test11');
+    expect(items[5].textContent).toBe('searchFunction2 results');
+    expect(items[5]).toBeDisabled();
+    expect(items[6].textContent).toBe('test21');
+    expect(items[10].textContent).toBe('searchFunction3 results');
+    expect(items[10]).toBeDisabled();
+    expect(items[11].textContent).toBe('test31');
+    expect(items[14].textContent).toBe('test41');
+  });
+});
+
+test('list opens on focus', async () => {
+  let searchResult: TypeaheadItem[] = [];
+  const searchFunction = async (): Promise<void> => {
+    searchResult = ['text1', 'text2', 'text3', 'text4'].map(value => ({ value: value }));
+  };
+
+  const { rerender } = render(Typeahead, {
+    onInputChange: searchFunction,
+    resultItems: searchResult,
+    delay: 10,
+  });
+
+  const input = screen.getByRole('textbox');
+  await userEvent.click(input);
+
+  await waitFor(() => expect(searchResult.length > 0).toBeTruthy());
+  await rerender({ resultItems: searchResult });
+
+  await waitFor(() => {
+    const list = screen.getByRole('row');
+    const items = within(list).getAllByRole('button');
+    expect(items.length).toBe(4);
+    expect(items[0].textContent).toBe('text1');
+    expect(items[1].textContent).toBe('text2');
+    expect(items[2].textContent).toBe('text3');
+    expect(items[3].textContent).toBe('text4');
+  });
 });

@@ -16,20 +16,21 @@
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import * as fs from 'node:fs';
 
 import type * as extensionApi from '@podman-desktop/api';
 import * as podmanDesktopApi from '@podman-desktop/api';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { createCluster } from './create-cluster';
 import * as extension from './extension';
 import type { KindGithubReleaseArtifactMetadata } from './kind-installer';
 import { KindInstaller } from './kind-installer';
 import * as util from './util';
 
-vi.mock('./image-handler', async () => {
+vi.mock('node:fs');
+vi.mock('./util');
+vi.mock('./image-handler', () => {
   return {
     ImageHandler: vi.fn().mockImplementation(() => {
       return {
@@ -38,92 +39,117 @@ vi.mock('./image-handler', async () => {
     }),
   };
 });
-
-vi.mock('@podman-desktop/api', async () => {
-  return {
-    window: {
-      withProgress: vi.fn(),
-      createStatusBarItem: vi.fn(),
-    },
-    cli: {
-      createCliTool: vi.fn(),
-    },
-    ProgressLocation: {
-      TASK_WIDGET: 'TASK_WIDGET',
-    },
-    provider: {
-      onDidRegisterContainerConnection: vi.fn(),
-      onDidUnregisterContainerConnection: vi.fn(),
-      onDidUpdateProvider: vi.fn(),
-      onDidUpdateContainerConnection: vi.fn(),
-      createProvider: vi.fn(),
-    },
-    containerEngine: {
-      listContainers: vi.fn(),
-      onEvent: vi.fn(),
-    },
-    commands: {
-      registerCommand: vi.fn(),
-    },
-    context: {
-      setValue: vi.fn(),
-    },
-    env: {
-      isWindows: false,
-      isMac: false,
-      isLinux: true,
-      createTelemetryLogger: vi.fn().mockReturnValue({
-        logUsage: vi.fn(),
-      } as unknown as extensionApi.TelemetryLogger),
-    },
-    process: {
-      exec: vi.fn(),
-    },
-  };
-});
-
-const kindInstallerMock = {
-  getLatestVersionAsset: vi.fn(),
-  getKindCliStoragePath: vi.fn(),
-  download: vi.fn(),
-  promptUserForVersion: vi.fn(),
-} as unknown as KindInstaller;
-
-vi.mock('./kind-installer', () => ({
-  KindInstaller: vi.fn(),
+vi.mock('./create-cluster', () => ({
+  createCluster: vi.fn(),
 }));
 
+vi.mock('./kind-installer');
+
+vi.mock('@podman-desktop/api', () => ({
+  window: {
+    withProgress: vi.fn(),
+    createStatusBarItem: vi.fn(),
+    showInformationMessage: vi.fn(),
+  },
+  cli: {
+    createCliTool: vi.fn(),
+  },
+  ProgressLocation: {
+    TASK_WIDGET: 'TASK_WIDGET',
+  },
+  provider: {
+    onDidRegisterContainerConnection: vi.fn(),
+    onDidUnregisterContainerConnection: vi.fn(),
+    onDidUpdateProvider: vi.fn(),
+    onDidUpdateContainerConnection: vi.fn(),
+    createProvider: vi.fn(),
+  },
+  containerEngine: {
+    listContainers: vi.fn(),
+    onEvent: vi.fn(),
+  },
+  commands: {
+    registerCommand: vi.fn(),
+  },
+  context: {
+    setValue: vi.fn(),
+  },
+  env: {
+    isWindows: false,
+    isMac: false,
+    isLinux: true,
+    createTelemetryLogger: vi.fn(),
+  },
+  process: {
+    exec: vi.fn(),
+  },
+}));
+
+const CLI_TOOL_MOCK: extensionApi.CliTool = {
+  displayName: 'test',
+  dispose: vi.fn(),
+  registerUpdate: vi.fn(),
+  registerInstaller: vi.fn(),
+  updateVersion: vi.fn(),
+  version: '0.0.1',
+} as unknown as extensionApi.CliTool;
+
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+
+  vi.mocked(KindInstaller.prototype.getKindCliStoragePath).mockReturnValue('storage-path');
+
+  vi.mocked(podmanDesktopApi.env.createTelemetryLogger).mockReturnValue({
+    logUsage: vi.fn(),
+  } as unknown as extensionApi.TelemetryLogger);
+
   vi.spyOn(console, 'log').mockImplementation(vi.fn());
   vi.spyOn(console, 'error').mockImplementation(vi.fn());
-  vi.mocked(podmanDesktopApi.cli.createCliTool).mockReturnValue({
-    displayName: 'test',
-    dispose: vi.fn(),
-  } as unknown as extensionApi.CliTool);
+
+  // mock create cli tool
+  vi.mocked(podmanDesktopApi.cli.createCliTool).mockReturnValue(CLI_TOOL_MOCK);
 
   vi.mocked(podmanDesktopApi.provider.createProvider).mockResolvedValue({
     setKubernetesProviderConnectionFactory: vi.fn(),
   } as unknown as extensionApi.Provider);
 
   const createProviderMock = vi.fn();
-  (podmanDesktopApi.provider as any).createProvider = createProviderMock;
+  podmanDesktopApi.provider.createProvider = createProviderMock;
   createProviderMock.mockImplementation(() => ({ setKubernetesProviderConnectionFactory: vi.fn() }));
 
   vi.mocked(podmanDesktopApi.containerEngine.listContainers).mockResolvedValue([]);
-  vi.mocked(KindInstaller).mockReturnValue(kindInstallerMock);
+  vi.mocked(util.removeVersionPrefix).mockReturnValue('1.0.0');
+  vi.mocked(util.getSystemBinaryPath).mockReturnValue('test-storage-path/kind');
 });
+
+afterEach(() => {
+  extension.deactivate();
+});
+
+function activate(options?: Partial<extensionApi.ExtensionContext>): Promise<void> {
+  return extension.activate(
+    vi.mocked<extensionApi.ExtensionContext>({
+      storagePath: 'test-storage-path',
+      subscriptions: {
+        push: vi.fn(),
+      },
+      ...options,
+    } as unknown as extensionApi.ExtensionContext),
+  );
+}
 
 test('check we received notifications ', async () => {
   const onDidUpdateContainerConnectionMock = vi.fn();
-  (podmanDesktopApi.provider as any).onDidUpdateContainerConnection = onDidUpdateContainerConnectionMock;
+  vi.mocked(podmanDesktopApi.provider.onDidUpdateContainerConnection).mockImplementation(
+    onDidUpdateContainerConnectionMock,
+  );
 
   const listContainersMock = vi.fn();
-  (podmanDesktopApi.containerEngine as any).listContainers = listContainersMock;
+  podmanDesktopApi.containerEngine.listContainers = listContainersMock;
   listContainersMock.mockResolvedValue([]);
 
   let callbackCalled = false;
-  onDidUpdateContainerConnectionMock.mockImplementation((callback: any) => {
+  onDidUpdateContainerConnectionMock.mockImplementation((callback: () => void) => {
     callback();
     callbackCalled = true;
   });
@@ -135,26 +161,16 @@ test('check we received notifications ', async () => {
 });
 
 describe('cli tool', () => {
-  test('activation should register cli tool when available, installed by desktop', async () => {
-    vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
+  beforeEach(() => {
+    vi.mocked(util.getKindBinaryInfo).mockResolvedValue({
       path: 'kind',
       version: '0.0.1',
     });
-    vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('kind');
-    vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue({
-      registerUpdate: vi.fn(),
-      registerInstaller: vi.fn(),
-      updateVersion: vi.fn(),
-    } as unknown as extensionApi.CliTool);
+    vi.mocked(util.getSystemBinaryPath).mockReturnValue('kind');
+  });
 
-    await extension.activate(
-      vi.mocked<extensionApi.ExtensionContext>({
-        storagePath: 'test-storage-path',
-        subscriptions: {
-          push: vi.fn(),
-        },
-      } as unknown as extensionApi.ExtensionContext),
-    );
+  test('activation should register cli tool when available, installed by desktop', async () => {
+    await activate();
 
     expect(podmanDesktopApi.cli.createCliTool).toHaveBeenCalledWith({
       displayName: 'Kind',
@@ -168,25 +184,9 @@ describe('cli tool', () => {
   });
 
   test('activation should register cli tool when available, installed by user', async () => {
-    vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
-      path: 'kind',
-      version: '0.0.1',
-    });
-    vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('user-kind');
-    vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue({
-      registerUpdate: vi.fn(),
-      registerInstaller: vi.fn(),
-      updateVersion: vi.fn(),
-    } as unknown as extensionApi.CliTool);
+    vi.mocked(util.getSystemBinaryPath).mockReturnValue('user-kind');
 
-    await extension.activate(
-      vi.mocked<extensionApi.ExtensionContext>({
-        storagePath: 'test-storage-path',
-        subscriptions: {
-          push: vi.fn(),
-        },
-      } as unknown as extensionApi.ExtensionContext),
-    );
+    await activate();
 
     expect(podmanDesktopApi.cli.createCliTool).toHaveBeenCalledWith({
       displayName: 'Kind',
@@ -200,24 +200,12 @@ describe('cli tool', () => {
   });
 
   test('activation should register cli tool when does not exist', async () => {
-    vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValue(new Error('does not exist'));
-    vi.spyOn(podmanDesktopApi.window, 'createStatusBarItem').mockReturnValue({
+    vi.mocked(util.getKindBinaryInfo).mockRejectedValue(new Error('does not exist'));
+    vi.mocked(podmanDesktopApi.window.createStatusBarItem).mockReturnValue({
       show: vi.fn(),
     } as unknown as extensionApi.StatusBarItem);
-    vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue({
-      registerUpdate: vi.fn(),
-      registerInstaller: vi.fn(),
-      updateVersion: vi.fn(),
-    } as unknown as extensionApi.CliTool);
 
-    await extension.activate(
-      vi.mocked<extensionApi.ExtensionContext>({
-        storagePath: 'test-storage-path',
-        subscriptions: {
-          push: vi.fn(),
-        },
-      } as unknown as extensionApi.ExtensionContext),
-    );
+    await activate();
 
     expect(podmanDesktopApi.cli.createCliTool).toHaveBeenCalledWith({
       name: 'kind',
@@ -230,26 +218,14 @@ describe('cli tool', () => {
   });
 
   test('activation should register cli tool when available in storage path', async () => {
-    vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValueOnce(new Error('does not exist')).mockResolvedValue({
+    // mock twice
+    vi.mocked(util.getKindBinaryInfo).mockRejectedValueOnce(new Error('does not exist')).mockResolvedValue({
       version: '0.0.1',
       path: 'test-storage-path/kind',
     });
 
-    vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('test-storage-path/kind');
-    vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue({
-      registerUpdate: vi.fn(),
-      registerInstaller: vi.fn(),
-      updateVersion: vi.fn(),
-    } as unknown as extensionApi.CliTool);
-
-    await extension.activate(
-      vi.mocked<extensionApi.ExtensionContext>({
-        storagePath: 'test-storage-path',
-        subscriptions: {
-          push: vi.fn(),
-        },
-      } as unknown as extensionApi.ExtensionContext),
-    );
+    vi.mocked(util.getSystemBinaryPath).mockReturnValue('test-storage-path/kind');
+    await activate();
 
     expect(util.getKindBinaryInfo).toHaveBeenCalledTimes(2);
     expect(podmanDesktopApi.cli.createCliTool).toHaveBeenCalledWith({
@@ -269,18 +245,18 @@ test('Ensuring a progress task is created when calling kind.image.move command',
     {};
 
   const registerCommandMock = vi.fn();
-  (podmanDesktopApi.commands as any).registerCommand = registerCommandMock;
+  podmanDesktopApi.commands.registerCommand = registerCommandMock;
 
   registerCommandMock.mockImplementation((command: string, callback: (image: { image: string }) => Promise<void>) => {
     commandRegistry[command] = callback;
   });
 
   const createProviderMock = vi.fn();
-  (podmanDesktopApi.provider as any).createProvider = createProviderMock;
+  podmanDesktopApi.provider.createProvider = createProviderMock;
   createProviderMock.mockImplementation(() => ({ setKubernetesProviderConnectionFactory: vi.fn() }));
 
   const listContainersMock = vi.fn();
-  (podmanDesktopApi.containerEngine as any).listContainers = listContainersMock;
+  podmanDesktopApi.containerEngine.listContainers = listContainersMock;
   listContainersMock.mockResolvedValue([]);
 
   const withProgressMock = vi
@@ -288,28 +264,17 @@ test('Ensuring a progress task is created when calling kind.image.move command',
     .mockImplementation(() =>
       extension.moveImage({ report: vi.fn() }, { id: 'id', image: 'hello:world', engineId: '1' }),
     );
-  (podmanDesktopApi.window as any).withProgress = withProgressMock;
+  podmanDesktopApi.window.withProgress = withProgressMock;
 
   const contextSetValueMock = vi.fn();
-  (podmanDesktopApi.context as any).setValue = contextSetValueMock;
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue({
-    registerUpdate: vi.fn(),
-    registerInstaller: vi.fn(),
-    updateVersion: vi.fn(),
-  } as unknown as extensionApi.CliTool);
+  podmanDesktopApi.context.setValue = contextSetValueMock;
 
-  vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
+  vi.mocked(util.getKindBinaryInfo).mockResolvedValue({
     path: 'kind',
     version: '0.0.1',
   });
 
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
+  await activate();
 
   // ensure the command has been registered
   expect(commandRegistry['kind.image.move']).toBeDefined();
@@ -323,288 +288,269 @@ test('Ensuring a progress task is created when calling kind.image.move command',
   expect(contextSetValueMock).toHaveBeenNthCalledWith(2, 'imagesPushInProgressToKind', []);
 });
 
-const cliToolMock = {
-  registerUpdate: vi.fn(),
-  registerInstaller: vi.fn(),
-  updateVersion: vi.fn(),
-} as unknown as extensionApi.CliTool;
+describe('cli#update', () => {
+  /**
+   * Utility method to get the {@link extensionApi.CliToolSelectUpdate} object registered by kind
+   */
+  async function getCliToolUpdate(): Promise<extensionApi.CliToolSelectUpdate> {
+    await activate();
 
-async function getCliToolUpdate(): Promise<extensionApi.CliToolSelectUpdate> {
-  vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValueOnce(new Error('does not exist')).mockResolvedValue({
-    version: '0.0.1',
-    path: 'test-storage-path/kind',
+    return await vi.waitFor<extensionApi.CliToolSelectUpdate>(() => {
+      expect(CLI_TOOL_MOCK.registerUpdate).toHaveBeenCalled();
+      const listener = vi.mocked(CLI_TOOL_MOCK.registerUpdate).mock.calls[0][0];
+      if (!('selectVersion' in listener)) throw new Error('kind should register update of type CliToolSelectUpdate');
+      return listener;
+    });
+  }
+
+  beforeEach(() => {
+    // mock existing cli object (otherwise we can't update)
+    vi.mocked(util.getKindBinaryInfo).mockResolvedValue({
+      path: 'test-storage-path/kind',
+      version: '0.0.1',
+    });
   });
 
-  vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('test-storage-path/kind');
-  vi.mocked(cliToolMock.registerUpdate).mockImplementation(mUpdate => {
-    if ('selectVersion' in mUpdate) {
-      update = mUpdate;
-    }
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
-  let update: extensionApi.CliToolSelectUpdate | undefined;
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
-
-  await vi.waitFor(() => {
-    expect(update).toBeDefined();
+  test('try to update before selecting cli tool version should throw an error', async () => {
+    const update: extensionApi.CliToolSelectUpdate = await getCliToolUpdate();
+    await expect(() => update?.doUpdate({} as unknown as extensionApi.Logger)).rejects.toThrowError(
+      'Cannot update test-storage-path/kind version 0.0.1. No release selected.',
+    );
   });
 
-  if (!update) throw new Error('undefined update');
-  return update;
+  test('update updatable version should update version', async () => {
+    vi.mocked(util.installBinaryToSystem).mockResolvedValue('path');
+
+    vi.mocked(KindInstaller.prototype.getKindCliStoragePath).mockReturnValue('storage-path');
+    vi.mocked(KindInstaller.prototype.promptUserForVersion).mockResolvedValue({
+      tag: 'v1.0.0',
+    } as unknown as KindGithubReleaseArtifactMetadata);
+    const update: extensionApi.CliToolSelectUpdate = await getCliToolUpdate();
+    await update?.selectVersion();
+    await update.doUpdate({} as unknown as extensionApi.Logger);
+
+    expect(KindInstaller.prototype.download).toHaveBeenCalledWith({
+      tag: 'v1.0.0',
+    });
+    expect(KindInstaller.prototype.getKindCliStoragePath).toHaveBeenCalled();
+
+    expect(util.installBinaryToSystem).toHaveBeenCalledWith('storage-path', 'kind');
+    expect(CLI_TOOL_MOCK.updateVersion).toHaveBeenCalledWith({
+      installationSource: 'extension',
+      path: 'path',
+      version: '1.0.0',
+    });
+  });
+});
+
+/**
+ * Utility method to get the {@link extensionApi.CliToolInstaller} object registered by kind
+ */
+async function getCliToolInstaller(): Promise<extensionApi.CliToolInstaller> {
+  await activate();
+
+  return await vi.waitFor<extensionApi.CliToolInstaller>(() => {
+    expect(CLI_TOOL_MOCK.registerInstaller).toHaveBeenCalled();
+    const listener = vi.mocked(CLI_TOOL_MOCK.registerInstaller).mock.calls[0][0];
+    expect(listener).toBeDefined();
+    return listener;
+  });
 }
 
-test('try to update before selecting cli tool version should throw an error', async () => {
-  const update: extensionApi.CliToolSelectUpdate = await getCliToolUpdate();
-  await expect(() => update?.doUpdate({} as unknown as extensionApi.Logger)).rejects.toThrowError(
-    'Cannot update test-storage-path/kind version 0.0.1. No release selected.',
-  );
-});
+describe('cli#install', () => {
+  beforeEach(() => {
+    // mock create cli tool
+    vi.mocked(podmanDesktopApi.cli.createCliTool).mockReturnValue({
+      ...CLI_TOOL_MOCK,
+      version: undefined,
+      dispose: vi.fn(),
+    });
 
-test('update updatable version should update version', async () => {
-  const installBinaryToSystemMock = vi.spyOn(util, 'installBinaryToSystem').mockResolvedValue('path');
-  vi.mocked(kindInstallerMock.getKindCliStoragePath).mockReturnValue('storage-path');
-  vi.mocked(kindInstallerMock.promptUserForVersion).mockResolvedValue({
-    tag: 'v1.0.0',
-  } as unknown as KindGithubReleaseArtifactMetadata);
-  const update: extensionApi.CliToolUpdate | extensionApi.CliToolSelectUpdate = await getCliToolUpdate();
-  await update?.selectVersion();
-  await update.doUpdate({} as unknown as extensionApi.Logger);
-
-  expect(kindInstallerMock.download).toHaveBeenCalledWith({
-    tag: 'v1.0.0',
-  });
-  expect(kindInstallerMock.getKindCliStoragePath).toHaveBeenCalled();
-
-  expect(installBinaryToSystemMock).toHaveBeenCalledWith('storage-path', 'kind');
-  expect(cliToolMock.updateVersion).toHaveBeenCalledWith({
-    installationSource: 'extension',
-    path: 'path',
-    version: '1.0.0',
-  });
-});
-
-test('try to install when there is already an existing version should throw an error', async () => {
-  vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
-    version: '0.0.1',
-    path: 'test-storage-path/kind',
+    // mock no kind detected
+    vi.mocked(util.getKindBinaryInfo).mockRejectedValue('no kind');
   });
 
-  vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('test-storage-path/kind');
+  test('try to install when there is already an existing version should throw an error', async () => {
+    // mock create cli tool (existing version)
+    vi.mocked(podmanDesktopApi.cli.createCliTool).mockReturnValue(CLI_TOOL_MOCK);
 
-  let cliToolInstaller: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstall => {
-    cliToolInstaller = mInstall;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
+    // mock existing cli tool
+    vi.mocked(util.getKindBinaryInfo).mockResolvedValue({
+      version: '0.0.1',
+      path: 'test-storage-path/kind',
+    });
 
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
 
-  await vi.waitFor(() => {
-    expect(cliToolInstaller).toBeDefined();
+    await expect(() => cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger)).rejects.toThrowError(
+      `Cannot install kind. Version 0.0.1 in test-storage-path/kind is already installed.`,
+    );
   });
 
-  if (!cliToolInstaller) throw new Error('undefined update');
+  test('try to install before selecting cli tool version should throw an error', async () => {
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
 
-  await expect(() => cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger)).rejects.toThrowError(
-    `Cannot install kind. Version 0.0.1 in test-storage-path/kind is already installed.`,
-  );
-});
-
-test('try to install before selecting cli tool version should throw an error', async () => {
-  vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValue('no kind');
-
-  let cliToolInstaller: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstall => {
-    cliToolInstaller = mInstall;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
-
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
-
-  await vi.waitFor(() => {
-    expect(cliToolInstaller).toBeDefined();
+    await expect(() => cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger)).rejects.toThrowError(
+      `Cannot install kind. No release selected.`,
+    );
   });
 
-  if (!cliToolInstaller) throw new Error('undefined update');
+  test('after selecting the version to be installed it should download kind', async () => {
+    vi.mocked(util.installBinaryToSystem).mockResolvedValue('path');
+    // mock prompt result
+    vi.mocked(KindInstaller.prototype.promptUserForVersion).mockResolvedValue({
+      tag: 'v1.0.0',
+    } as unknown as KindGithubReleaseArtifactMetadata);
 
-  await expect(() => cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger)).rejects.toThrowError(
-    `Cannot install kind. No release selected.`,
-  );
-});
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
 
-test('after selecting the version to be installed it should download kind', async () => {
-  const installBinaryToSystemMock = vi.spyOn(util, 'installBinaryToSystem').mockResolvedValue('path');
-  vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValue('no kind');
-  vi.mocked(kindInstallerMock.promptUserForVersion).mockResolvedValue({
-    tag: 'v1.0.0',
-  } as unknown as KindGithubReleaseArtifactMetadata);
+    // mock workflow (user select version then we install it)
+    await cliToolInstaller?.selectVersion();
+    await cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger);
 
-  let installer: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
-    installer = mInstaller;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
-
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
-
-  await vi.waitFor(() => {
-    expect(installer).toBeDefined();
+    expect(KindInstaller.prototype.download).toHaveBeenCalledWith({
+      tag: 'v1.0.0',
+    });
+    expect(KindInstaller.prototype.getKindCliStoragePath).toHaveBeenCalled();
+    expect(util.installBinaryToSystem).toHaveBeenCalledWith('storage-path', 'kind');
+    expect(CLI_TOOL_MOCK.updateVersion).toHaveBeenCalledWith({
+      installationSource: 'extension',
+      path: 'path',
+      version: '1.0.0',
+    });
   });
 
-  await installer?.selectVersion();
+  test('if installing system wide fails, it should not throw', async () => {
+    // mock error when trying to install system wide
+    vi.mocked(util.installBinaryToSystem).mockRejectedValue('error');
+    // mock user select v1.0.0
+    vi.mocked(KindInstaller.prototype.promptUserForVersion).mockResolvedValue({
+      tag: 'v1.0.0',
+    } as unknown as KindGithubReleaseArtifactMetadata);
 
-  await installer?.doInstall({} as unknown as extensionApi.Logger);
-  expect(kindInstallerMock.download).toHaveBeenCalledWith({
-    tag: 'v1.0.0',
-  });
-  expect(kindInstallerMock.getKindCliStoragePath).toHaveBeenCalled();
-  expect(installBinaryToSystemMock).toHaveBeenCalledWith('storage-path', 'kind');
-  expect(cliToolMock.updateVersion).toHaveBeenCalledWith({
-    installationSource: 'extension',
-    path: 'path',
-    version: '1.0.0',
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
+
+    await cliToolInstaller?.selectVersion();
+
+    await cliToolInstaller?.doInstall({} as unknown as extensionApi.Logger);
+
+    // ensure the download has been called
+    expect(KindInstaller.prototype.download).toHaveBeenCalledWith({
+      tag: 'v1.0.0',
+    });
+    expect(KindInstaller.prototype.getKindCliStoragePath).toHaveBeenCalled();
+    expect(util.installBinaryToSystem).toHaveBeenCalledWith('storage-path', 'kind');
+    expect(CLI_TOOL_MOCK.updateVersion).toHaveBeenCalledWith({
+      installationSource: 'extension',
+      path: 'storage-path',
+      version: '1.0.0',
+    });
   });
 });
 
-test('if installing system wide fails, it should not throw', async () => {
-  const installBinaryToSystemMock = vi.spyOn(util, 'installBinaryToSystem').mockRejectedValue('error');
-  vi.spyOn(util, 'getKindBinaryInfo').mockRejectedValue('no kind');
-  vi.mocked(kindInstallerMock.promptUserForVersion).mockResolvedValue({
-    tag: 'v1.0.0',
-  } as unknown as KindGithubReleaseArtifactMetadata);
-
-  let installer: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
-    installer = mInstaller;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
-
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
-
-  await vi.waitFor(() => {
-    expect(installer).toBeDefined();
+describe('cli#uninstall', () => {
+  beforeEach(() => {
+    // mock binary exists (otherwise we can't uninstall it)
+    vi.mocked(util.getKindBinaryInfo).mockResolvedValue({
+      version: '0.0.1',
+      path: 'test-storage-path/kind',
+    });
   });
 
-  await installer?.selectVersion();
+  test('by uninstalling it should delete all executables', async () => {
+    // mock the binary exists
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(podmanDesktopApi.process.exec).mockResolvedValue({
+      stdout: 'test-storage-path/kind',
+    } as extensionApi.RunResult);
 
-  await installer?.doInstall({} as unknown as extensionApi.Logger);
-  expect(kindInstallerMock.download).toHaveBeenCalledWith({
-    tag: 'v1.0.0',
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
+
+    await cliToolInstaller?.doUninstall({} as unknown as extensionApi.Logger);
+    expect(fs.promises.unlink).toHaveBeenCalledWith('storage-path');
+    expect(podmanDesktopApi.process.exec).toHaveBeenCalledWith('which', ['test-storage-path/kind']);
+    expect(podmanDesktopApi.process.exec).toHaveBeenCalledWith('rm', ['test-storage-path/kind'], { isAdmin: true });
   });
-  expect(kindInstallerMock.getKindCliStoragePath).toHaveBeenCalled();
-  expect(installBinaryToSystemMock).toHaveBeenCalledWith('storage-path', 'kind');
-  expect(cliToolMock.updateVersion).toHaveBeenCalledWith({
-    installationSource: 'extension',
-    path: 'storage-path',
-    version: '1.0.0',
+
+  test('if unlink fails because of a permission issue, it should delete all binaries as admin', async () => {
+    // mock the binary exists
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    // mock issue with unlink
+    vi.mocked(fs.promises.unlink).mockRejectedValue({
+      code: 'EACCES',
+    } as unknown as Error);
+
+    const cliToolInstaller: extensionApi.CliToolInstaller = await getCliToolInstaller();
+
+    await cliToolInstaller?.doUninstall({} as unknown as extensionApi.Logger);
+
+    // check command
+    expect(podmanDesktopApi.process.exec).toHaveBeenNthCalledWith(1, 'rm', ['storage-path'], { isAdmin: true });
   });
 });
 
-test('by uninstalling it should delete all executables', async () => {
-  vi.mock('node:fs');
-  vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
-    version: '0.0.1',
-    path: 'test-storage-path/kind',
+describe('kubernetes create factory', () => {
+  const PROVIDER_MOCK: podmanDesktopApi.Provider = {
+    setKubernetesProviderConnectionFactory: vi.fn(),
+  } as unknown as podmanDesktopApi.Provider;
+
+  beforeEach(async () => {
+    // default: no binary
+    vi.mocked(util.getKindBinaryInfo).mockRejectedValue(new Error('no binary installed'));
+
+    vi.mocked(podmanDesktopApi.provider.createProvider).mockReturnValue(PROVIDER_MOCK);
+    // default to cancel
+    vi.mocked(podmanDesktopApi.window.showInformationMessage).mockResolvedValue('Cancel');
+    // mock artifact
+    vi.mocked(KindInstaller.prototype.getLatestVersionAsset).mockResolvedValue({
+      tag: 'v1.5.6',
+    } as unknown as KindGithubReleaseArtifactMetadata);
+
+    // activate
+    await extension.activate(
+      vi.mocked<extensionApi.ExtensionContext>({
+        subscriptions: {
+          push: vi.fn(),
+        },
+      } as unknown as extensionApi.ExtensionContext),
+    );
   });
 
-  vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('test-storage-path/kind');
-  vi.spyOn(fs, 'existsSync').mockReturnValue(true);
-
-  let installer: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
-    installer = mInstaller;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
-
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
-
-  await vi.waitFor(() => {
-    expect(installer).toBeDefined();
+  test('activate should register a kubernetes create factory', async () => {
+    expect(PROVIDER_MOCK.setKubernetesProviderConnectionFactory).toHaveBeenCalledOnce();
   });
 
-  await installer?.doUninstall({} as unknown as extensionApi.Logger);
-  expect(fs.promises.unlink).toHaveBeenNthCalledWith(1, 'storage-path');
-  expect(fs.promises.unlink).toHaveBeenNthCalledWith(2, 'test-storage-path/kind');
-});
+  test('expect info message to be displayed when no binary installed and cluster created called', async () => {
+    // get the create method
+    const { create } = vi.mocked(PROVIDER_MOCK.setKubernetesProviderConnectionFactory).mock.calls[0][0];
+    expect(create).toBeDefined();
 
-test('if unlink fails because of a permission issue, it should delete all binaries as admin', async () => {
-  vi.mock('node:fs');
-  vi.spyOn(util, 'getKindBinaryInfo').mockResolvedValue({
-    version: '0.0.1',
-    path: 'test-storage-path/kind',
+    await expect(() => {
+      return create?.({}, undefined, undefined);
+    }).rejects.toThrowError('Unable to create kind cluster. No kind cli detected');
+
+    expect(podmanDesktopApi.window.showInformationMessage).toHaveBeenCalledWith(
+      'Kind is not installed, do you want to install the latest version?',
+      'Cancel',
+      'Confirm',
+    );
   });
 
-  vi.spyOn(util, 'getSystemBinaryPath').mockReturnValue('test-storage-path/kind');
-  vi.spyOn(fs, 'existsSync').mockReturnValue(true);
-  vi.mocked(fs.promises.unlink).mockRejectedValue({
-    code: 'EACCES',
-  } as unknown as Error);
-  const command = process.platform === 'win32' ? 'del' : 'rm';
+  test('user confirm installation should install latest', async () => {
+    // get the create method
+    const { create } = vi.mocked(PROVIDER_MOCK.setKubernetesProviderConnectionFactory).mock.calls[0][0];
+    expect(create).toBeDefined();
 
-  let installer: extensionApi.CliToolInstaller | undefined;
-  vi.mocked(cliToolMock.registerInstaller).mockImplementation(mInstaller => {
-    installer = mInstaller;
-    return { dispose: vi.fn() };
-  });
-  vi.spyOn(podmanDesktopApi.cli, 'createCliTool').mockReturnValue(cliToolMock);
+    // simulate user confirmed
+    vi.mocked(podmanDesktopApi.window.showInformationMessage).mockResolvedValue('Confirm');
 
-  await extension.activate(
-    vi.mocked<extensionApi.ExtensionContext>({
-      subscriptions: {
-        push: vi.fn(),
-      },
-    } as unknown as extensionApi.ExtensionContext),
-  );
+    await create?.({}, undefined, undefined);
 
-  await vi.waitFor(() => {
-    expect(installer).toBeDefined();
-  });
+    // expect getLatestVersionAsset and download
+    expect(KindInstaller.prototype.getLatestVersionAsset).toHaveBeenCalled();
+    expect(KindInstaller.prototype.download).toHaveBeenCalled();
 
-  await installer?.doUninstall({} as unknown as extensionApi.Logger);
-  expect(podmanDesktopApi.process.exec).toHaveBeenNthCalledWith(1, command, ['storage-path'], { isAdmin: true });
-  expect(podmanDesktopApi.process.exec).toHaveBeenNthCalledWith(2, command, ['test-storage-path/kind'], {
-    isAdmin: true,
+    expect(createCluster).toHaveBeenCalled();
   });
 });

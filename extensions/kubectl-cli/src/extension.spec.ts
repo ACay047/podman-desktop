@@ -15,7 +15,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -202,9 +201,11 @@ test('kubectl CLI tool not registered when version cannot be extracted from obje
   const wrongJsonStdout = {
     clientVersion: {
       ...jsonStdout.clientVersion,
+      gitVersion: jsonStdout.clientVersion.gitVersion || undefined,
     },
   };
-  delete (wrongJsonStdout.clientVersion as any).gitVersion;
+
+  delete wrongJsonStdout.clientVersion.gitVersion;
   vi.mocked(extensionApi.process.exec).mockResolvedValue({
     stderr: '',
     stdout: JSON.stringify(wrongJsonStdout),
@@ -407,7 +408,7 @@ describe('postActivate', () => {
       tag: 'v1.1.0',
       id: -1,
     } as KubectlGithubReleaseArtifactMetadata);
-    // mock return value bellow current
+    // mock return value below current
     vi.mocked(KubectlGitHubReleases).mockReturnValue({
       grabLatestsReleasesMetadata: vi.fn().mockResolvedValue([
         {
@@ -467,7 +468,7 @@ describe('postActivate', () => {
           });
         }),
     );
-    // mock return value bellow current
+    // mock return value below current
     vi.mocked(KubectlGitHubReleases).mockReturnValue({
       grabLatestsReleasesMetadata: vi.fn().mockResolvedValue([
         {
@@ -523,7 +524,7 @@ describe('postActivate', () => {
       tag: 'v1.1.0',
       id: -1,
     } as KubectlGithubReleaseArtifactMetadata);
-    // mock return value bellow current
+    // mock return value below current
     vi.mocked(KubectlGitHubReleases).mockReturnValue({
       grabLatestsReleasesMetadata: vi.fn().mockResolvedValue([
         {
@@ -585,7 +586,7 @@ describe('postActivate', () => {
           });
         }),
     );
-    // mock return value bellow current
+    // mock return value below current
     vi.mocked(KubectlGitHubReleases).mockReturnValue({
       grabLatestsReleasesMetadata: vi.fn().mockResolvedValue([
         {
@@ -614,14 +615,17 @@ describe('postActivate', () => {
       },
     );
     vi.spyOn(fs, 'existsSync').mockReturnValue(true);
+    vi.mocked(extensionApi.env).isMac = true;
+    vi.mocked(extensionApi.env).isWindows = false;
 
     await KubectlExtension.activate(extensionContext);
 
     const cliInstaller = await deferredCliInstall;
     await cliInstaller.doUninstall({} as unknown as Logger);
 
-    expect(fs.promises.unlink).toHaveBeenNthCalledWith(1, path.join(extensionContext.storagePath, 'bin', 'kubectl'));
-    expect(fs.promises.unlink).toHaveBeenNthCalledWith(2, 'system-path');
+    expect(fs.promises.unlink).toHaveBeenCalledWith(path.join(extensionContext.storagePath, 'bin', 'kubectl'));
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('which', ['system-path']);
+    expect(extensionApi.process.exec).toHaveBeenCalledWith('rm', ['system-path'], { isAdmin: true });
   });
 
   test('if unlink fails because of a permission issue, it should delete all binaries as admin', async () => {
@@ -644,7 +648,7 @@ describe('postActivate', () => {
           });
         }),
     );
-    // mock return value bellow current
+    // mock return value below current
     vi.mocked(KubectlGitHubReleases).mockReturnValue({
       grabLatestsReleasesMetadata: vi.fn().mockResolvedValue([
         {
@@ -676,7 +680,8 @@ describe('postActivate', () => {
     vi.mocked(fs.promises.unlink).mockRejectedValue({
       code: 'EACCES',
     } as unknown as Error);
-    const command = process.platform === 'win32' ? 'del' : 'rm';
+    vi.mocked(extensionApi.env).isMac = true;
+    vi.mocked(extensionApi.env).isWindows = false;
 
     await KubectlExtension.activate(extensionContext);
 
@@ -685,10 +690,9 @@ describe('postActivate', () => {
 
     expect(extensionApi.process.exec).toHaveBeenNthCalledWith(
       4,
-      command,
+      'rm',
       [path.join(extensionContext.storagePath, 'bin', 'kubectl')],
       { isAdmin: true },
     );
-    expect(extensionApi.process.exec).toHaveBeenNthCalledWith(5, command, ['system-path'], { isAdmin: true });
   });
 });

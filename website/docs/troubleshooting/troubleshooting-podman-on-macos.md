@@ -271,3 +271,28 @@ Error: vm podman-machine-default not found: podman-machine-default: VM does not 
 #### Additional resources
 
 - [Issue #9860](https://github.com/podman-desktop/podman-desktop/issues/9860)
+
+## Running out of disk space on macOS
+
+On macOS, `.plist` files append Podman Desktop data to the previous log files, increasing their size.
+
+With Podman Desktop 1.16, the log files are automatically cleaned at the restart of the application. This ensures the log files do not increase indefinitely in size. However, you can check the size of the log files to manually troubleshoot disk space issues at any time.
+
+#### Solution
+
+Check the size of the Podman Desktop log files to troubleshoot:
+
+```sh
+$ ls -la ~/Library/Logs/Podman\ Desktop/*.log
+```
+
+With Podman Desktop 1.16.0 or later versions, your computer might require a restart to truncate the Podman Desktop log files.
+To avoid restarting your computer, run these commands one by one:
+
+```shell-session
+$ launchctl unload  ~/Library/LaunchAgents/io.podman_desktop.PodmanDesktop.plist
+```
+
+```shell-session
+$ launchctl load  ~/Library/LaunchAgents/io.podman_desktop.PodmanDesktop.plist
+```

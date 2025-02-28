@@ -10,6 +10,7 @@ that we follow.
 ## Topics
 
 - [Reporting Issues](#reporting-issues)
+- [Providing Extensions](#providing-extensions)
 - [Working On Issues](#working-on-issues)
 - [Contributing](#contributing)
 - [Continuous Integration](#continuous-integration)
@@ -37,6 +38,19 @@ The easier it is for us to reproduce it, the faster it'll be fixed!
 
 Please don't include any private/sensitive information in your issue!
 
+## Providing Extensions
+
+Some of the best features of Podman Desktop aren't even in this repository!
+Podman Desktop provides a set of API that expands its capabilities
+by installing [extensions](https://podman-desktop.io/extensions).
+
+Extensions add support for new container engines, command line tools,
+Kubernetes providers, or add elements to the UI like actions, badges, or views.
+You can create your own extension and contribute it to the catalog for
+others to use.
+
+See the [extension documentation](https://podman-desktop.io/docs/extensions) on our website for more information.
+
 ## Working On Issues
 
 Often issues will be assigned to someone, to be worked on at a later time.
@@ -62,10 +76,10 @@ Requirements:
 
 Optional Linux requirements:
 
-- [Flatpak builder, runtime, and SDK, version 23.08](https://docs.flatpak.org/en/latest/first-build.html)
+- [Flatpak builder, runtime, and SDK, version 24.08](https://docs.flatpak.org/en/latest/first-build.html)
   ```sh
   flatpak remote-add --if-not-exists flathub --user https://flathub.org/repo/flathub.flatpakrepo
-  flatpak install --user flathub org.flatpak.Builder org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+  flatpak install --user flathub org.flatpak.Builder org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
   ```
 - GNU C and C++ compiler
   Fedora/RHEL
@@ -408,12 +422,6 @@ If you're unsure where to add code (renderer, UI, extensions, plugins) see the b
 - `node_modules`: Location for Node.JS packages / dependencies.
 
 > **_NOTE:_** Each `extension` folder is a separately packaged module. If there are any issues with loading, make sure your module is packaged correctly.
-
-### Extensions
-
-Podman Desktop is modularized into extensions for each 'Provider'. You can also create and add your own extension.
-
-See our [extensions documentation](https://podman-desktop.io/docs/extensions) on our website for more information.
 
 ### UI colors
 

@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,13 @@ import { KubernetesResourceState, PodState } from '../model/core/states';
 import { KubernetesResources } from '../model/core/types';
 import { createKindCluster, deleteCluster } from '../utility/cluster-operations';
 import { expect as playExpect, test } from '../utility/fixtures';
-import { deletePod, ensureCliInstalled, handleConfirmationDialog } from '../utility/operations';
+import {
+  applyYamlFileToCluster,
+  checkKubernetesResourceState,
+  createKubernetesResource,
+  deleteKubernetesResource,
+} from '../utility/kubernetes';
+import { deletePod, ensureCliInstalled } from '../utility/operations';
 import { waitForPodmanMachineStartup } from '../utility/wait';
 
 const CLUSTER_NAME: string = 'kind-cluster';
@@ -53,6 +59,7 @@ const SECRET_YAML_PATH = path.resolve(__dirname, '..', '..', 'resources', 'kuber
 const SECRET_POD_YAML_PATH = path.resolve(__dirname, '..', '..', 'resources', 'kubernetes', `${SECRET_POD_NAME}.yaml`);
 
 const skipKindInstallation = process.env.SKIP_KIND_INSTALL === 'true';
+const providerTypeGHA = process.env.KIND_PROVIDER_GHA ?? '';
 
 test.beforeAll(async ({ runner, welcomePage, page, navigationBar }) => {
   test.setTimeout(350_000);
@@ -68,7 +75,10 @@ test.beforeAll(async ({ runner, welcomePage, page, navigationBar }) => {
   }
 
   if (process.env.GITHUB_ACTIONS && process.env.RUNNER_OS === 'Linux') {
-    await createKindCluster(page, CLUSTER_NAME, false, CLUSTER_CREATION_TIMEOUT, { useIngressController: false });
+    await createKindCluster(page, CLUSTER_NAME, false, CLUSTER_CREATION_TIMEOUT, {
+      providerType: providerTypeGHA,
+      useIngressController: false,
+    });
   } else {
     await createKindCluster(page, CLUSTER_NAME, true, CLUSTER_CREATION_TIMEOUT);
   }
@@ -84,130 +94,73 @@ test.afterAll(async ({ runner, page }) => {
 });
 
 test.describe('Kubernetes resources End-to-End test', { tag: '@k8s_e2e' }, () => {
-  test('Kubernetes Nodes test', async ({ navigationBar }) => {
-    const kubernetesBar = await navigationBar.openKubernetes();
-    const nodesPage = await kubernetesBar.openTabPage(KubernetesResources.Nodes);
-    await playExpect(nodesPage.heading).toBeVisible();
-    await playExpect(nodesPage.getResourceRowByName(KIND_NODE)).toBeVisible();
-
-    const nodeDetails = await nodesPage.openResourceDetails(KIND_NODE, KubernetesResources.Nodes);
-    await playExpect(nodeDetails.heading).toBeVisible();
-    await playExpect
-      .poll(async () => nodeDetails.getState(), { timeout: 50_000 })
-      .toEqual(KubernetesResourceState.Running);
+  test('Kubernetes Nodes test', async ({ page }) => {
+    await checkKubernetesResourceState(page, KubernetesResources.Nodes, KIND_NODE, KubernetesResourceState.Running);
   });
   test.describe
     .serial('PVC lifecycle test', () => {
-      test('Create a new PVC resource', async ({ navigationBar }) => {
-        const podsPage = await navigationBar.openPods();
-        await playExpect(podsPage.heading).toBeVisible();
-        const playYamlPage = await podsPage.openPlayKubeYaml();
-        await playExpect(playYamlPage.heading).toBeVisible();
-        await playYamlPage.playYaml(PVC_YAML_PATH, KUBERNETES_RUNTIME);
-
-        const kubernetesBar = await navigationBar.openKubernetes();
-        const pvcsPage = await kubernetesBar.openTabPage(KubernetesResources.PVCs);
-        await playExpect(pvcsPage.heading).toBeVisible();
-        await playExpect(pvcsPage.getResourceRowByName(PVC_NAME)).toBeVisible();
-        const pvcDetails = await pvcsPage.openResourceDetails(PVC_NAME, KubernetesResources.PVCs);
-        await playExpect(pvcDetails.heading).toBeVisible();
-        await playExpect
-          .poll(async () => pvcDetails.getState(), { timeout: 50_000 })
-          .toEqual(KubernetesResourceState.Stopped);
+      test('Create a new PVC resource', async ({ page }) => {
+        await createKubernetesResource(page, KubernetesResources.PVCs, PVC_NAME, PVC_YAML_PATH, KUBERNETES_RUNTIME);
+        await checkKubernetesResourceState(page, KubernetesResources.PVCs, PVC_NAME, KubernetesResourceState.Stopped);
       });
-      test('Bind the PVC to a pod', async ({ navigationBar }) => {
-        const podsPage = await navigationBar.openPods();
-        await playExpect(podsPage.heading).toBeVisible();
-        const playYamlPage = await podsPage.openPlayKubeYaml();
-        await playExpect(playYamlPage.heading).toBeVisible();
-        await playYamlPage.playYaml(PVC_POD_YAML_PATH, KUBERNETES_RUNTIME);
-
-        const kubernetesBar = await navigationBar.openKubernetes();
-        const pvcsPage = await kubernetesBar.openTabPage(KubernetesResources.PVCs);
-        const pvcDetails = await pvcsPage.openResourceDetails(PVC_NAME, KubernetesResources.PVCs);
-        await playExpect(pvcDetails.heading).toBeVisible();
-        await playExpect
-          .poll(async () => pvcDetails.getState(), { timeout: 50_000 })
-          .toEqual(KubernetesResourceState.Running);
+      test('Bind the PVC to a pod', async ({ page }) => {
+        await applyYamlFileToCluster(page, PVC_POD_YAML_PATH, KUBERNETES_RUNTIME);
+        await checkKubernetesResourceState(page, KubernetesResources.PVCs, PVC_NAME, KubernetesResourceState.Running);
       });
-      test('Delete the PVC resource', async ({ page, navigationBar }) => {
-        await deletePod(page, PVC_POD_NAME);
-        const kubernetesBar = await navigationBar.openKubernetes();
-        const pvcsPage = await kubernetesBar.openTabPage(KubernetesResources.PVCs);
-        await pvcsPage.deleteKubernetesResource(PVC_NAME);
-        await handleConfirmationDialog(page);
-        await playExpect(pvcsPage.getResourceRowByName(PVC_NAME)).not.toBeVisible();
+      test('Delete the PVC resource', async ({ page }) => {
+        await deleteKubernetesResource(page, KubernetesResources.Pods, PVC_POD_NAME);
+        await deleteKubernetesResource(page, KubernetesResources.PVCs, PVC_NAME);
       });
     });
   test.describe
     .serial('ConfigMaps and Secrets lifecycle test', () => {
-      test('Create ConfigMap resource', async ({ navigationBar }) => {
-        const podsPage = await navigationBar.openPods();
-        await playExpect(podsPage.heading).toBeVisible();
-        const playYamlPage = await podsPage.openPlayKubeYaml();
-        await playExpect(playYamlPage.heading).toBeVisible();
-        await playYamlPage.playYaml(CONFIGMAP_YAML_PATH, KUBERNETES_RUNTIME);
-
-        const kubernetesBar = await navigationBar.openKubernetes();
-        const configmapSecretsPage = await kubernetesBar.openTabPage(KubernetesResources.ConfigMapsSecrets);
-        await playExpect(configmapSecretsPage.heading).toBeVisible();
-        await playExpect(configmapSecretsPage.getResourceRowByName(CONFIGMAP_NAME)).toBeVisible();
-        const configmapDetails = await configmapSecretsPage.openResourceDetails(
+      test('Create ConfigMap resource', async ({ page }) => {
+        await createKubernetesResource(
+          page,
+          KubernetesResources.ConfigMapsSecrets,
           CONFIGMAP_NAME,
-          KubernetesResources.ConfigMapsSecrets,
+          CONFIGMAP_YAML_PATH,
+          KUBERNETES_RUNTIME,
         );
-        await playExpect(configmapDetails.heading).toBeVisible();
-        await playExpect
-          .poll(async () => configmapDetails.getState(), { timeout: 50_000 })
-          .toEqual(KubernetesResourceState.Running);
+        await checkKubernetesResourceState(
+          page,
+          KubernetesResources.ConfigMapsSecrets,
+          CONFIGMAP_NAME,
+          KubernetesResourceState.Running,
+        );
       });
-      test('Create Secret resource', async ({ navigationBar }) => {
-        const podsPage = await navigationBar.openPods();
-        await playExpect(podsPage.heading).toBeVisible();
-        const playYamlPage = await podsPage.openPlayKubeYaml();
-        await playExpect(playYamlPage.heading).toBeVisible();
-        await playYamlPage.playYaml(SECRET_YAML_PATH, KUBERNETES_RUNTIME);
+      test('Create Secret resource', async ({ page }) => {
+        await createKubernetesResource(
+          page,
+          KubernetesResources.ConfigMapsSecrets,
+          SECRET_NAME,
+          SECRET_YAML_PATH,
+          KUBERNETES_RUNTIME,
+        );
+        await checkKubernetesResourceState(
+          page,
+          KubernetesResources.ConfigMapsSecrets,
+          SECRET_NAME,
+          KubernetesResourceState.Running,
+        );
+      });
+      test('Can load config and secrets via env. var in pod', async ({ page, navigationBar }) => {
+        await applyYamlFileToCluster(page, SECRET_POD_YAML_PATH, KUBERNETES_RUNTIME);
 
         const kubernetesBar = await navigationBar.openKubernetes();
-        const configmapSecretsPage = await kubernetesBar.openTabPage(KubernetesResources.ConfigMapsSecrets);
-        await playExpect(configmapSecretsPage.heading).toBeVisible();
-        await playExpect(configmapSecretsPage.getResourceRowByName(SECRET_NAME)).toBeVisible();
-        const secretDetails = await configmapSecretsPage.openResourceDetails(
-          SECRET_NAME,
-          KubernetesResources.ConfigMapsSecrets,
-        );
-        await playExpect(secretDetails.heading).toBeVisible();
+        const kubernetesPodsPage = await kubernetesBar.openTabPage(KubernetesResources.Pods);
         await playExpect
-          .poll(async () => secretDetails.getState(), { timeout: 50_000 })
-          .toEqual(KubernetesResourceState.Running);
-      });
-      test('Can load config and secrets via env. var in pod', async ({ navigationBar }) => {
-        const podsPage = await navigationBar.openPods();
-        await playExpect(podsPage.heading).toBeVisible();
-        const playYamlPage = await podsPage.openPlayKubeYaml();
-        await playExpect(playYamlPage.heading).toBeVisible();
-        await playYamlPage.playYaml(SECRET_POD_YAML_PATH, KUBERNETES_RUNTIME);
-
-        await playExpect(podsPage.heading).toBeVisible();
-        await playExpect
-          .poll(async () => podsPage.getPodRowByName(SECRET_POD_NAME), {
-            timeout: 15_000,
-          })
+          .poll(async () => kubernetesPodsPage.getResourceRowByName(SECRET_POD_NAME), { timeout: 25_000 })
           .toBeTruthy();
-        const podsDetailsPage = await podsPage.openPodDetails(SECRET_POD_NAME);
+
+        const podsDetailsPage = await kubernetesPodsPage.openResourceDetails(SECRET_POD_NAME, KubernetesResources.Pods);
         await playExpect(podsDetailsPage.heading).toBeVisible();
         await playExpect.poll(async () => podsDetailsPage.getState(), { timeout: 50_000 }).toEqual(PodState.Running);
       });
-      test('Delete the ConfigMap and Secret resources', async ({ page, navigationBar }) => {
+      test('Delete the ConfigMap and Secret resources', async ({ page }) => {
         await deletePod(page, SECRET_POD_NAME);
-        const kubernetesBar = await navigationBar.openKubernetes();
-        const configmapsSecretsPage = await kubernetesBar.openTabPage(KubernetesResources.ConfigMapsSecrets);
-        await configmapsSecretsPage.deleteKubernetesResource(SECRET_NAME);
-        await handleConfirmationDialog(page);
-        await configmapsSecretsPage.deleteKubernetesResource(CONFIGMAP_NAME);
-        await handleConfirmationDialog(page);
-        await playExpect(configmapsSecretsPage.getResourceRowByName(SECRET_NAME)).not.toBeVisible();
-        await playExpect(configmapsSecretsPage.getResourceRowByName(CONFIGMAP_NAME)).not.toBeVisible();
+        await deleteKubernetesResource(page, KubernetesResources.ConfigMapsSecrets, SECRET_NAME);
+        await deleteKubernetesResource(page, KubernetesResources.ConfigMapsSecrets, CONFIGMAP_NAME);
       });
     });
 });

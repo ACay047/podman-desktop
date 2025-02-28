@@ -1,12 +1,17 @@
 <script lang="ts">
+import { faQuestionCircle } from '@fortawesome/free-regular-svg-icons';
 import { faRightToBracket, faTrash } from '@fortawesome/free-solid-svg-icons';
-import { Button, EmptyScreen, ErrorMessage, Spinner } from '@podman-desktop/ui-svelte';
+import { Button, EmptyScreen, ErrorMessage, Spinner, Tooltip } from '@podman-desktop/ui-svelte';
 import { onMount } from 'svelte';
+import Fa from 'svelte-fa';
 import { router } from 'tinro';
 
 import { kubernetesContextsHealths } from '/@/stores/kubernetes-context-health';
+import { kubernetesContextsPermissions } from '/@/stores/kubernetes-context-permission';
 import { kubernetesContextsCheckingStateDelayed, kubernetesContextsState } from '/@/stores/kubernetes-contexts-state';
+import { kubernetesResourcesCount } from '/@/stores/kubernetes-resources-count';
 import type { KubeContext } from '/@api/kubernetes-context';
+import type { SelectedResourceName } from '/@api/kubernetes-contexts-states';
 
 import { kubernetesContexts } from '../../stores/kubernetes-contexts';
 import { clearKubeUIContextErrors, setKubeUIContextError } from '../kube/KubeContextUI';
@@ -15,9 +20,18 @@ import ListItemButtonIcon from '../ui/ListItemButtonIcon.svelte';
 import SettingsPage from './SettingsPage.svelte';
 
 interface KubeContextWithStates extends KubeContext {
+  // some informers have been disconnected, and their caches are still populated with the last seen resources
+  isOffline: boolean;
+  // the context has been marked as reachable (during health check in experimental mode)
+  // the context will still be marked as reachable even if it is offline
   isReachable: boolean;
   isKnown: boolean;
   isBeingChecked: boolean;
+  podsCount?: number;
+  deploymentsCount?: number;
+  podsPermitted: boolean;
+  deploymentsPermitted: boolean;
+  notPermittedHelp?: string;
 }
 
 const currentContextName = $derived($kubernetesContexts.find(c => c.currentContext)?.name);
@@ -26,12 +40,22 @@ let kubeconfigFilePath: string = $state('');
 let experimentalStates: boolean = $state(false);
 
 const kubernetesContextsWithStates: KubeContextWithStates[] = $derived(
-  $kubernetesContexts.map(kubeContext => ({
-    ...kubeContext,
-    isReachable: isContextReachable(kubeContext.name, experimentalStates),
-    isKnown: isContextKnown(kubeContext.name, experimentalStates),
-    isBeingChecked: isContextBeingChecked(kubeContext.name, experimentalStates),
-  })),
+  $kubernetesContexts
+    .map(kubeContext => ({
+      ...kubeContext,
+      isReachable: isContextReachable(kubeContext.name, experimentalStates),
+      isOffline: isContextOffline(kubeContext.name, experimentalStates),
+      isKnown: isContextKnown(kubeContext.name, experimentalStates),
+      isBeingChecked: isContextBeingChecked(kubeContext.name, experimentalStates),
+      podsCount: getResourcesCount(kubeContext.name, 'pods', experimentalStates),
+      deploymentsCount: getResourcesCount(kubeContext.name, 'deployments', experimentalStates),
+      podsPermitted: getResourcePermitted(kubeContext.name, 'pods', experimentalStates),
+      deploymentsPermitted: getResourcePermitted(kubeContext.name, 'deployments', experimentalStates),
+    }))
+    .map(kubeContext => ({
+      ...kubeContext,
+      notPermittedHelp: getNotPermittedHelp(kubeContext.podsPermitted, kubeContext.deploymentsPermitted),
+    })),
 );
 
 onMount(async () => {
@@ -95,6 +119,15 @@ function isContextReachable(contextName: string, experimental: boolean): boolean
   return $kubernetesContextsState.get(contextName)?.reachable ?? false;
 }
 
+function isContextOffline(contextName: string, experimental: boolean): boolean {
+  if (experimental) {
+    return $kubernetesContextsHealths.some(
+      contextHealth => contextHealth.contextName === contextName && contextHealth.offline,
+    );
+  }
+  return false; // not implement in non-experimental mode
+}
+
 function isContextKnown(contextName: string, experimental: boolean): boolean {
   if (experimental) {
     return $kubernetesContextsHealths.some(contextHealth => contextHealth.contextName === contextName);
@@ -109,6 +142,46 @@ function isContextBeingChecked(contextName: string, experimental: boolean): bool
     );
   }
   return !!$kubernetesContextsCheckingStateDelayed?.get(contextName);
+}
+
+function getResourcesCount(
+  contextName: string,
+  resourceName: SelectedResourceName,
+  experimental: boolean,
+): number | undefined {
+  if (experimental) {
+    return $kubernetesResourcesCount.find(
+      resourcesCount => resourcesCount.contextName === contextName && resourcesCount.resourceName === resourceName,
+    )?.count;
+  }
+  return $kubernetesContextsState.get(contextName)?.resources[resourceName];
+}
+
+function getResourcePermitted(contextName: string, resourceName: SelectedResourceName, experimental: boolean): boolean {
+  if (experimental) {
+    const permission = $kubernetesContextsPermissions.find(
+      permissions => permissions.contextName === contextName && permissions.resourceName === resourceName,
+    );
+    if (!permission) {
+      return false;
+    }
+    return permission.permitted;
+  }
+  return true;
+}
+
+function getNotPermittedHelp(podsPermitted: boolean, deploymentsPermitted: boolean): string {
+  const notPermitted = [];
+  if (!podsPermitted) {
+    notPermitted.push('Pods');
+  }
+  if (!deploymentsPermitted) {
+    notPermitted.push('Deployments');
+  }
+  if (!notPermitted.length) {
+    return '';
+  }
+  return notPermitted.join(' and ') + ' are not accessible';
 }
 
 async function connect(contextName: string): Promise<void> {
@@ -157,7 +230,7 @@ async function connect(contextName: string): Promise<void> {
               {/if}
             {/if}
             <!-- Centered items div -->
-            <div class="pl-3 flex-grow flex flex-col justify-center">
+            <div class="pl-3 grow flex flex-col justify-center">
               <div class="flex flex-col items-left">
                 {#if context.currentContext}
                   <span class="text-sm text-[var(--pd-invert-content-card-text)]" aria-label="Current Context"
@@ -184,31 +257,53 @@ async function connect(contextName: string): Promise<void> {
         <div class="grow flex-column divide-gray-900 text-[var(--pd-invert-content-card-text)]">
           <div class="flex flex-row">
             <div class="flex-none w-36">
-              {#if context.isReachable}
+              {#if context.isReachable || context.isOffline}
                 <div class="flex flex-row pt-2">
-                  <div class="w-3 h-3 rounded-full bg-[var(--pd-status-connected)]"></div>
-                  <div
-                    class="ml-1 font-bold text-[9px] text-[var(--pd-status-connected)]"
-                    aria-label="Context Reachable">
-                    REACHABLE
-                  </div>
+                  {#if context.isOffline}
+                    <Tooltip class="flex flex-row" tip="connection lost, resources may be out of sync">
+                      <div class="w-3 h-3 rounded-full bg-[var(--pd-status-paused)]"></div>
+                      <div
+                        class="ml-1 font-bold text-[9px] text-[var(--pd-status-paused)]"
+                        aria-label="Context connection lost">
+                        CONNECTION LOST
+                      </div>
+                    </Tooltip>
+                  {:else}
+                    <div class="w-3 h-3 rounded-full bg-[var(--pd-status-connected)]"></div>
+                    <div
+                      class="ml-1 font-bold text-[9px] text-[var(--pd-status-connected)]"
+                      aria-label="Context Reachable">
+                      REACHABLE
+                    </div>
+                  {/if}
                 </div>
                 <div class="flex flex-row gap-4 mt-4">
                   <div class="text-center">
-                    <div class="font-bold text-[9px] text-[var(--pd-invert-content-card-text)]">PODS</div>
-                    <div class="text-[16px] text-[var(--pd-invert-content-card-text)]" aria-label="Context Pods Count">
-                      {$kubernetesContextsState.get(context.name)?.resources.pods}
+                    <div class="font-bold text-[9px] text-[var(--pd-invert-content-card-text)]" class:opacity-60={!context.podsPermitted}>PODS</div>
+                    <div class="text-[16px] text-[var(--pd-invert-content-card-text)]" class:opacity-60={!context.podsPermitted} aria-label="Context Pods Count">
+                      {#if context.podsPermitted}
+                        {#if context.podsCount !== undefined}{context.podsCount}{/if}
+                      {:else}-{/if}
                     </div>
                   </div>
                   <div class="text-center">
-                    <div class="font-bold text-[9px] text-[var(--pd-invert-content-card-text)]">DEPLOYMENTS</div>
+                    <div class="font-bold text-[9px] text-[var(--pd-invert-content-card-text)]" class:opacity-60={!context.deploymentsPermitted}>DEPLOYMENTS</div>
                     <div
                       class="text-[16px] text-[var(--pd-invert-content-card-text)]"
+                      class:opacity-60={!context.deploymentsPermitted}
                       aria-label="Context Deployments Count">
-                      {$kubernetesContextsState.get(context.name)?.resources.deployments}
+                      {#if context.deploymentsPermitted}
+                        {#if context.deploymentsCount !== undefined}{context.deploymentsCount}{/if}
+                      {:else}-{/if}
                     </div>
                   </div>
                 </div>
+                {#if context.isOffline}
+                  <div><Button on:click={(): Promise<void> => connect(context.name)}>Connect</Button></div>
+                {/if}
+                {#if !context.podsPermitted || !context.deploymentsPermitted}
+                  <Tooltip tip={context.notPermittedHelp}><div><Fa size="1x" icon={faQuestionCircle} /></div></Tooltip>
+                {/if}
               {:else}
                 <div class="flex flex-col space-y-2">
                   <div class="flex flex-row pt-2">

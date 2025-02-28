@@ -3,6 +3,7 @@ import { faTrash } from '@fortawesome/free-solid-svg-icons';
 import {
   Button,
   FilteredEmptyScreen,
+  Link,
   NavPage,
   Table,
   TableColumn,
@@ -10,8 +11,6 @@ import {
   TableRow,
 } from '@podman-desktop/ui-svelte';
 import { onMount } from 'svelte';
-
-import KubernetesCurrentContextConnectionBadge from '/@/lib/ui/KubernetesCurrentContextConnectionBadge.svelte';
 
 import type { PodInfo } from '../../../../main/src/plugin/api/pod-info';
 import { filtered, podsInfos, searchPattern } from '../../stores/pods';
@@ -25,7 +24,6 @@ import KubePlayButton from '../kube/KubePlayButton.svelte';
 import { PodUtils } from './pod-utils';
 import PodColumnActions from './PodColumnActions.svelte';
 import PodColumnContainers from './PodColumnContainers.svelte';
-import PodColumnEnvironment from './PodColumnEnvironment.svelte';
 import PodColumnName from './PodColumnName.svelte';
 import PodColumnStatus from './PodColumnStatus.svelte';
 import PodEmptyScreen from './PodEmptyScreen.svelte';
@@ -116,6 +114,10 @@ async function deleteSelectedPods(): Promise<void> {
   bulkDeleteInProgress = false;
 }
 
+async function openKubePods(): Promise<void> {
+  await window.navigateToRoute('kubernetes', { kind: 'Pod' });
+}
+
 let selectedItemsNumber: number = $state(0);
 let table: Table;
 
@@ -132,11 +134,6 @@ let nameColumn = new TableColumn<PodInfoUI>('Name', {
   comparator: (a, b): number => a.name.localeCompare(b.name),
 });
 
-let envColumn = new TableColumn<PodInfoUI>('Environment', {
-  renderer: PodColumnEnvironment,
-  comparator: (a, b): number => a.kind.localeCompare(b.kind),
-});
-
 let containersColumn = new TableColumn<PodInfoUI>('Containers', {
   renderer: PodColumnContainers,
   comparator: (a, b): number => a.containers.length - b.containers.length,
@@ -146,6 +143,7 @@ let containersColumn = new TableColumn<PodInfoUI>('Containers', {
 
 let ageColumn = new TableColumn<PodInfoUI, Date | undefined>('Age', {
   renderer: TableDurationColumn,
+  comparator: (a, b): number => new Date(a.created).getTime() - new Date(b.created).getTime(),
   renderMapping(object): Date | undefined {
     return podUtils.getUpDate(object);
   },
@@ -154,7 +152,6 @@ let ageColumn = new TableColumn<PodInfoUI, Date | undefined>('Age', {
 const columns = [
   statusColumn,
   nameColumn,
-  envColumn,
   containersColumn,
   ageColumn,
   new TableColumn<PodInfoUI>('Actions', { align: 'right', width: '150px', renderer: PodColumnActions, overflow: true }),
@@ -186,45 +183,48 @@ const row = new TableRow<PodInfoUI>({ selectable: (_pod): boolean => true });
         icon={faTrash} />
       <span>On {selectedItemsNumber} selected items.</span>
     {/if}
-    <div class="flex grow justify-end">
-      <KubernetesCurrentContextConnectionBadge />
-    </div>
   </svelte:fragment>
 
   <svelte:fragment slot="tabs">
-    <Button
-      type="tab"
-      on:click={(): void => {
-        searchTerm = searchTerm
-          .split(' ')
-          .filter(pattern => pattern !== 'is:running' && pattern !== 'is:stopped')
-          .join(' ');
-      }}
-      selected={!searchTerm.includes('is:stopped') && !searchTerm.includes('is:running')}>All</Button>
-    <Button
-      type="tab"
-      on:click={(): void => {
-        let temp = searchTerm
-          .trim()
-          .split(' ')
-          .filter(term => term !== 'is:stopped' && term !== 'is:running')
-          .join(' ')
-          .trim();
-        searchTerm = temp ? `${temp} is:running` : 'is:running';
-      }}
-      selected={searchTerm.includes('is:running')}>Running</Button>
-    <Button
-      type="tab"
-      on:click={(): void => {
-        let temp = searchTerm
-          .trim()
-          .split(' ')
-          .filter(term => term !== 'is:stopped' && term !== 'is:running')
-          .join(' ')
-          .trim();
-        searchTerm = temp ? `${temp} is:stopped` : 'is:stopped';
-      }}
-      selected={searchTerm.includes('is:stopped')}>Stopped</Button>
+    <div class="flex flex-col gap-3">
+      <div class="self-center text-[var(--pd-table-body-text)]">Looking for pods running on a Kubernetes cluster? We have moved them to the <Link on:click={openKubePods}>Kubernetes &gt; Pods</Link> page.</div>
+
+      <div class="flex flex-row">
+        <Button
+          type="tab"
+          on:click={(): void => {
+            searchTerm = searchTerm
+              .split(' ')
+              .filter(pattern => pattern !== 'is:running' && pattern !== 'is:stopped')
+              .join(' ');
+          }}
+          selected={!searchTerm.includes('is:stopped') && !searchTerm.includes('is:running')}>All</Button>
+        <Button
+          type="tab"
+          on:click={(): void => {
+            let temp = searchTerm
+              .trim()
+              .split(' ')
+              .filter(term => term !== 'is:stopped' && term !== 'is:running')
+              .join(' ')
+              .trim();
+            searchTerm = temp ? `${temp} is:running` : 'is:running';
+          }}
+          selected={searchTerm.includes('is:running')}>Running</Button>
+        <Button
+          type="tab"
+          on:click={(): void => {
+            let temp = searchTerm
+              .trim()
+              .split(' ')
+              .filter(term => term !== 'is:stopped' && term !== 'is:running')
+              .join(' ')
+              .trim();
+            searchTerm = temp ? `${temp} is:stopped` : 'is:stopped';
+          }}
+          selected={searchTerm.includes('is:stopped')}>Stopped</Button>
+      </div>
+    </div>
   </svelte:fragment>
 
   <div class="flex min-w-full h-full" slot="content">

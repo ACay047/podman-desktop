@@ -134,3 +134,14 @@ Access the **Settings** page in the UI to do these tasks:
 - [Configure a registry](/docs/containers/registries)
 - [Configure a CLI tool](/tutorial/managing-your-application-resources#managing-other-resources)
 - [Configure a Kubernetes context](/docs/kubernetes/viewing-and-selecting-current-kubernetes-context#procedure-using-the-podman-desktop-settings)
+
+#### Experimental features
+
+The experimental features are in-progress features released to collect user feedback. The Podman Desktop UI offers a dedicated page for viewing all experimental features. Access the page by navigating to **Settings > Experimental**.
+
+![experimental features page](img/experimental-features.png)
+
+The page helps you to:
+
+- Enable all experimental features simultaneously or enable an experimental feature individually.
+- Share any feedback or suggestions on the dedicated discussion pages created on GitHub.

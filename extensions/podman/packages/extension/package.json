@@ -2,7 +2,7 @@
   "name": "podman",
   "displayName": "Podman",
   "description": "Integration for Podman and Podman Machines",
-  "version": "1.16.0-next",
+  "version": "1.17.0-next",
   "icon": "icon.png",
   "type": "module",
   "publisher": "podman-desktop",
@@ -40,6 +40,10 @@
       {
         "command": "podman.onboarding.removeUnsupportedMachines",
         "title": "Podman: Remove unsupported podman machines"
+      },
+      {
+        "command": "podman.setupRegistry",
+        "title": "Podman: Setup registry"
       }
     ],
     "configuration": {
@@ -233,6 +237,7 @@
     },
     "onboarding": {
       "title": "Podman Setup",
+      "priority": 1,
       "steps": [
         {
           "id": "checkInstalledCommand",
@@ -382,6 +387,15 @@
         }
       ],
       "enablement": "(isLinux && onboardingContext:podmanIsNotInstalled) || (!isLinux && !onboardingContext:podmanMachineExists) || podman.needPodmanMachineCleanup"
+    },
+    "menus": {
+      "dashboard/container-connection": [
+        {
+          "command": "podman.setupRegistry",
+          "title": "Setup registry configuration",
+          "when": "selectedProviderConnectionType === 'podman' && selectedProviderConnectionStatus === 'started'"
+        }
+      ]
     }
   },
   "scripts": {
@@ -392,22 +406,25 @@
   },
   "dependencies": {
     "@podman-desktop/api": "workspace:*",
+    "async-mutex": "^0.5.0",
     "compare-versions": "^6.1.1",
+    "mustache": "^4.2.0",
     "ps-list": "^8.1.1",
     "smol-toml": "1.3.1",
     "ssh2": "^1.16.0"
   },
   "devDependencies": {
+    "@types/mustache": "^4.2.5",
     "@types/ssh2": "^1.15.4",
     "@types/sshpk": "^1.17.4",
     "adm-zip": "^0.5.16",
     "hasha": "^6.0.0",
     "mkdirp": "^3.0.1",
-    "msw": "^2.7.0",
-    "octokit": "^4.1.0",
+    "msw": "^2.7.3",
+    "octokit": "^4.1.2",
     "sshpk": "^1.18.0",
-    "tsx": "^4.19.2",
-    "vite": "^6.0.10",
-    "vitest": "^2.1.6"
+    "tsx": "^4.19.3",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.6"
   }
 }

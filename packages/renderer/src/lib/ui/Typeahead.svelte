@@ -1,6 +1,8 @@
 <script lang="ts">
 import { Spinner } from '@podman-desktop/ui-svelte';
 
+import type { TypeaheadGroupedItems, TypeaheadHeadings, TypeaheadItem } from './Typeahead';
+
 interface Props {
   placeholder?: string;
   required?: boolean;
@@ -10,12 +12,12 @@ interface Props {
   id?: string;
   name?: string;
   error?: boolean;
-  resultItems?: string[];
-  sort?: boolean;
+  resultItems?: TypeaheadItem[];
   onInputChange?: (s: string) => Promise<void>;
   onChange?: (value: string) => void;
   onEnter?: () => void;
   class?: string;
+  compare?: (a: string, b: string) => number;
 }
 
 let {
@@ -28,36 +30,75 @@ let {
   name,
   error = false,
   resultItems = [],
-  sort = false,
   onInputChange,
   onChange,
   onEnter,
   class: className,
+  compare,
 }: Props = $props();
 
 let inputDelayTimeout: NodeJS.Timeout | undefined = undefined;
 let input: HTMLInputElement | undefined = $state();
 let list: HTMLDivElement | undefined = $state();
+let inputDiv: HTMLDivElement | undefined = $state();
 let scrollElements: HTMLElement[] = $state([]);
 let value: string = $state('');
-let items: string[] = $derived(
-  sort
-    ? resultItems.toSorted((a: string, b: string) => {
-        if (a.startsWith(userValue) === b.startsWith(userValue)) {
-          return a.localeCompare(b);
-        } else if (a.startsWith(userValue) && !b.startsWith(userValue)) {
-          return -1;
-        } else {
-          return 1;
-        }
-      })
-    : resultItems,
-);
 let opened: boolean = $state(false);
 let highlightIndex: number = $state(-1);
 let pageStep: number = $state(10);
 let userValue: string = $state('');
 let loading: boolean = $state(false);
+
+let groupedItems: TypeaheadGroupedItems = $derived.by(() => {
+  let groupItems: TypeaheadGroupedItems = {};
+  let groups = [...new Set(resultItems.map(item => item.group ?? ''))];
+  for (const group of groups) {
+    let values = resultItems.filter(item => (group ? item.group === group : !item.group)).map(item => item.value);
+    groupItems[group] = values.toSorted(
+      compare ??
+        ((a: string, b: string): number => {
+          if (a.startsWith(userValue) === b.startsWith(userValue)) {
+            return a.localeCompare(b);
+          } else if (a.startsWith(userValue) && !b.startsWith(userValue)) {
+            return -1;
+          } else {
+            return 1;
+          }
+        }),
+    );
+  }
+  return groupItems;
+});
+
+let itemHeadings: TypeaheadHeadings = $derived.by(() => {
+  if (disabled) {
+    return {};
+  }
+  let headingIndex = 0;
+  let headings: TypeaheadHeadings = {};
+  for (const group in groupedItems) {
+    if (group) {
+      if (headings[headingIndex]) {
+        headings[headingIndex].push(group);
+      } else {
+        headings[headingIndex] = [group];
+      }
+      headingIndex += groupedItems[group].length;
+    }
+  }
+  return headings;
+});
+
+let items: string[] = $derived.by(() => {
+  if (disabled) {
+    return [];
+  }
+  let currentItems: string[] = [];
+  for (const group in groupedItems) {
+    currentItems = currentItems.concat(groupedItems[group]);
+  }
+  return currentItems;
+});
 
 function onItemSelected(s: string): void {
   value = s;
@@ -200,7 +241,7 @@ function requestFocus(e: HTMLInputElement): void {
 }
 
 function onWindowClick(e: Event): void {
-  if (list && e.target instanceof Node && !list.contains(e.target)) {
+  if (list && e.target instanceof Node && !list.contains(e.target) && !inputDiv?.contains(e.target)) {
     close();
   }
 }
@@ -217,7 +258,8 @@ function onWindowClick(e: Event): void {
   class:focus-within:border-[var(--pd-input-field-hover-stroke)]={!disabled}
   class:border-b-[var(--pd-input-field-stroke-readonly)]={disabled}
   class:border-b-[var(--pd-input-field-stroke-error)]={error}
-  class:focus-within:border-[var(--pd-input-field-stroke-error)]={error}>
+  class:focus-within:border-[var(--pd-input-field-stroke-error)]={error}
+  bind:this={inputDiv}>
   <input
     type="text"
     class="w-full px-0.5 outline-0 bg-[var(--pd-input-field-bg)] placeholder:text-[color:var(--pd-input-field-placeholder-text)] overflow-hidden"
@@ -235,6 +277,7 @@ function onWindowClick(e: Event): void {
     name={name}
     oninput={onInput}
     onkeydown={onKeyDown}
+    onfocus={processInput}
     use:requestFocus />
   {#if loading}
     <Spinner size="1em" />
@@ -246,6 +289,11 @@ function onWindowClick(e: Event): void {
     bind:this={list}
     class="max-h-80 overflow-auto bg-[var(--pd-content-card-bg)] border-[var(--pd-input-field-hover-stroke)] border-[1px]">
     {#each items as item, i}
+      {#if itemHeadings[i]}
+        {#each itemHeadings[i] as heading}
+          <button class='p-[2px] text-[var(--pd-button-disabled-text)] w-full text-start' disabled>{heading}</button>
+        {/each}
+      {/if}
       <button
         bind:this={scrollElements[i]}
         class:bg-[var(--pd-content-card-hover-bg)]={i === highlightIndex}

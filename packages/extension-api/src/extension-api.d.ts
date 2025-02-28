@@ -607,13 +607,22 @@ declare module '@podman-desktop/api' {
     preflightChecks?(): InstallCheck[];
   }
 
+  export interface AutostartContext {
+    /**
+     * updateContainerConnection must be called by the provider when a connection status is updated
+     */
+    updateContainerConnection(containerProviderConnection: ContainerProviderConnection): void;
+  }
+
   /**
    * By providing this interface, when Podman Desktop is starting
    * It'll start the provider through this interface.
    * It can be turned off/on by the user.
+   *
+   * `context` contains helper functions to be called by the provider during startup (see {@link AutostartContext})
    */
   export interface ProviderAutostart {
-    start(logger: Logger): Promise<void>;
+    start(logger: Logger, context?: AutostartContext): Promise<void>;
   }
 
   /**
@@ -701,6 +710,9 @@ declare module '@podman-desktop/api' {
 
   /**
    * The commands module provides functions to register and execute commands
+   * Existing commands available for extensions to use:
+   * - `pullImage`: uses Podman Desktop's UI pull image behavior. This command will create a visible task to show the progress of the pullImage action with the option to include a task action.
+   * It uses the same parameters as the original pullImage function, in addition to having `taskActionName: string` and `taskActionCallback: () => void` as parameters to create a task action (optional).
    *
    * @example
    * ```typescript
@@ -1082,7 +1094,7 @@ declare module '@podman-desktop/api' {
     url: string;
 
     // Optional base64 PNG image (for transparency / non vector icons)
-    icon?: string;
+    icon?: string | { light: string; dark: string };
   }
 
   export interface Registry extends RegistryCreateOptions {
@@ -1090,7 +1102,7 @@ declare module '@podman-desktop/api' {
 
     // Optional name and icon for the registry when it's being added (used for display within the UI)
     name?: string;
-    icon?: string;
+    icon?: string | { light: string; dark: string };
   }
 
   export interface RegistryCreateOptions {
@@ -3905,6 +3917,7 @@ declare module '@podman-desktop/api' {
      * @param options optional options for listing information
      * @returns A promise resolving to an array of engine information.
      *
+     * @remarks only returns the {@link ContainerEngineInfo} of **running** connections
      * @example
      * // Example 1: List all engine information when no specific provider is provided.
      * const infos = await listInfos();
@@ -4773,6 +4786,9 @@ declare module '@podman-desktop/api' {
     export function navigateToPods(): Promise<void>;
     // Navigate to a specific pod referenced by kind, name and engineId
     export function navigateToPod(kind: string, name: string, engineId: string): Promise<void>;
+
+    // Navigate to the CliTools page
+    export function navigateToCliTools(): Promise<void>;
 
     // Navigate to a specific contribution (aka extension page) referenced by name
     export function navigateToContribution(name: string): Promise<void>;

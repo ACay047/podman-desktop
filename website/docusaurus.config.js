@@ -35,8 +35,7 @@ const config = {
       return {
         name: 'docusaurus-tailwindcss',
         configurePostCss(postcssOptions) {
-          postcssOptions.plugins.push(require('tailwindcss'));
-          postcssOptions.plugins.push(require('autoprefixer'));
+          postcssOptions.plugins.push(require('@tailwindcss/postcss'));
           return postcssOptions;
         },
       };
@@ -103,6 +102,18 @@ const config = {
           {
             to: '/docs/kubernetes',
             from: '/docs/onboarding-for-kubernetes',
+          },
+          {
+            to: '/docs/kind/pushing-an-image-to-kind',
+            from: '/docs/kubernetes/kind/pushing-an-image-to-kind',
+          },
+          {
+            to: '/docs/minikube/pushing-an-image-to-minikube',
+            from: '/docs/kubernetes/minikube/pushing-an-image-to-minikube',
+          },
+          {
+            to: '/docs/lima/pushing-an-image-to-lima',
+            from: '/docs/kubernetes/lima/pushing-an-image-to-lima',
           },
           {
             to: '/docs/kubernetes/deploying-a-pod-to-kubernetes',
@@ -409,7 +420,13 @@ const config = {
             label: 'Documentation',
           },
           { to: '/features', label: 'Features', position: 'left' },
-          { to: '/downloads', label: 'Downloads', position: 'left' },
+          {
+            type: 'custom-telemetryLink',
+            position: 'left',
+            to: '/downloads',
+            eventPath: '/download',
+            eventTitle: 'navigation-download',
+          },
           { to: '/extend', label: 'Extend', position: 'left' },
           { to: '/blog', label: 'Blog', position: 'left' },
           { to: '/tutorial', label: 'Tutorials', position: 'left' },
@@ -465,7 +482,15 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} ${title} - Apache License 2.0 License`,
+        copyright: `<div class="flex flex-col items-center divide-y-4 divide-none">
+        <div class="w-80"><img class="dark:hidden" alt="Cloud Native Computing Foundation" src="/img/cncf-logo.svg"><img class="hidden dark:inline" alt="Cloud Native Computing Foundation" src="/img/cncf-logo-dark.svg"></div>
+        <div>We are a <a href="https://cncf.io/">Cloud Native Computing Foundation</a> sandbox project.</div>
+        <div class="text-sm">
+        © Copyright ${title} Contributors ${new Date().getFullYear()}. © ${new Date().getFullYear()} The Linux Foundation. All rights reserved.
+        </div>
+        <div class="text-xs">The Linux Foundation has registered trademarks and uses trademarks. For a list of trademarks of The Linux Foundation, please see our <a href="https://www.linuxfoundation.org/trademark-usage/"> Trademark Usage</a> page.
+        </div>
+      `,
       },
       prism: {
         theme: lightCodeTheme,

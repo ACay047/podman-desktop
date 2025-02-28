@@ -107,4 +107,12 @@ export class ImageDetailsPage extends DetailsPage {
 
     return new ImagesPage(this.page);
   }
+
+  async pushImageToKindCluster(): Promise<void> {
+    const pushToKindButton = this.page.getByRole('button', { name: 'Push image to Kind cluster' });
+    await playExpect(pushToKindButton).toBeVisible();
+    await pushToKindButton.click();
+
+    await handleConfirmationDialog(this.page, 'Kind', true, 'OK', '', 15_000);
+  }
 }

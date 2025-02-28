@@ -1,42 +1,29 @@
 <script lang="ts">
-import {
-  FilteredEmptyScreen,
-  NavPage,
-  Table,
-  TableColumn,
-  TableDurationColumn,
-  TableRow,
-  TableSimpleColumn,
-} from '@podman-desktop/ui-svelte';
+import { TableColumn, TableDurationColumn, TableRow, TableSimpleColumn } from '@podman-desktop/ui-svelte';
 import moment from 'moment';
-import { onMount } from 'svelte';
 
-import KubeActions from '/@/lib/kube/KubeActions.svelte';
-import KubernetesCurrentContextConnectionBadge from '/@/lib/ui/KubernetesCurrentContextConnectionBadge.svelte';
 import { kubernetesCurrentContextNodesFiltered, nodeSearchPattern } from '/@/stores/kubernetes-contexts-state';
 
 import NodeIcon from '../images/NodeIcon.svelte';
+import NameColumn from '../kube/column/Name.svelte';
+import KubernetesObjectsList from '../objects/KubernetesObjectsList.svelte';
 import { NodeUtils } from './node-utils';
-import NodeColumnName from './NodeColumnName.svelte';
 import NodeColumnRoles from './NodeColumnRoles.svelte';
 import NodeColumnStatus from './NodeColumnStatus.svelte';
 import NodeEmptyScreen from './NodeEmptyScreen.svelte';
 import type { NodeUI } from './NodeUI';
 
-export let searchTerm = '';
-$: nodeSearchPattern.set(searchTerm);
+interface Props {
+  searchTerm?: string;
+}
 
-let nodes: NodeUI[] = [];
+let { searchTerm = '' }: Props = $props();
 
-const nodeUtils = new NodeUtils();
-
-onMount(() => {
-  return kubernetesCurrentContextNodesFiltered.subscribe(value => {
-    nodes = value.map(node => nodeUtils.getNodeUI(node));
-  });
+$effect(() => {
+  nodeSearchPattern.set(searchTerm);
 });
 
-let table: Table;
+const nodeUtils = new NodeUtils();
 
 let statusColumn = new TableColumn<NodeUI>('Status', {
   align: 'center',
@@ -46,7 +33,7 @@ let statusColumn = new TableColumn<NodeUI>('Status', {
 });
 
 let nameColumn = new TableColumn<NodeUI>('Name', {
-  renderer: NodeColumnName,
+  renderer: NameColumn,
   comparator: (a, b): number => a.name.localeCompare(b.name),
 });
 
@@ -86,34 +73,24 @@ const columns = [statusColumn, nameColumn, rolesColumn, versionColumn, osImageCo
 const row = new TableRow<NodeUI>({});
 </script>
 
-<NavPage bind:searchTerm={searchTerm} title="nodes">
-  <svelte:fragment slot="additional-actions">
-    <KubeActions />
-  </svelte:fragment>
-
-  <svelte:fragment slot="bottom-additional-actions">
-    <div class="flex grow justify-end">
-      <KubernetesCurrentContextConnectionBadge />
-    </div>
-  </svelte:fragment>
-
-  <div class="flex min-w-full h-full" slot="content">
-    <Table
-      kind="node"
-      bind:this={table}
-      data={nodes}
-      columns={columns}
-      row={row}
-      defaultSortColumn="Name"
-      on:update={(): NodeUI[] => (nodes = nodes)}>
-    </Table>
-
-    {#if $kubernetesCurrentContextNodesFiltered.length === 0}
-      {#if searchTerm}
-        <FilteredEmptyScreen icon={NodeIcon} kind="nodes" bind:searchTerm={searchTerm} />
-      {:else}
-        <NodeEmptyScreen />
-      {/if}
-    {/if}
-  </div>
-</NavPage>
+<KubernetesObjectsList
+  kinds={[{
+    resource: 'nodes',
+    transformer: nodeUtils.getNodeUI.bind(nodeUtils),
+    delete: async (): Promise<void> => {},
+    isResource: (): boolean => true,
+    legacySearchPatternStore: nodeSearchPattern,
+    legacyObjectStore: kubernetesCurrentContextNodesFiltered,
+  }]}
+  singular="node"
+  plural="nodes"
+  icon={NodeIcon}
+  searchTerm={searchTerm}
+  columns={columns}
+  row={row}
+  >
+    <!-- eslint-disable-next-line sonarjs/no-unused-vars -->
+    {#snippet emptySnippet()}
+      <NodeEmptyScreen />
+    {/snippet}
+  </KubernetesObjectsList>

@@ -35,6 +35,7 @@ beforeAll(() => {
     value: {
       openExternal: openExternalMock,
       previewOnGitHub: previewOnGitHubMock,
+      telemetryTrack: vi.fn(),
       navigator: {
         clipboard: {
           writeText: vi.fn(),
@@ -47,6 +48,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(window.previewOnGitHub).mockResolvedValue(undefined);
+  vi.mocked(window.telemetryTrack).mockResolvedValue(undefined);
 });
 
 /**
@@ -57,6 +60,7 @@ function renderGitHubIssueFeedback(props: ComponentProps<typeof GitHubIssueFeedb
   title: HTMLInputElement;
   description: HTMLTextAreaElement;
   preview: HTMLButtonElement;
+  cancel: HTMLButtonElement;
   includeSystemInfo?: HTMLElement;
   includeExtensionInfo?: HTMLElement;
 } & RenderResult<Component<ComponentProps<typeof GitHubIssueFeedback>>> {
@@ -73,6 +77,10 @@ function renderGitHubIssueFeedback(props: ComponentProps<typeof GitHubIssueFeedb
   const preview = getByRole('button', { name: 'Preview on GitHub' });
   expect(preview).toBeInstanceOf(HTMLButtonElement);
 
+  // button
+  const cancel = getByRole('button', { name: 'Cancel' });
+  expect(cancel).toBeInstanceOf(HTMLButtonElement);
+
   // checkbox
   const includeSystemInfo = queryByTitle('Include system information') ?? undefined;
 
@@ -82,6 +90,7 @@ function renderGitHubIssueFeedback(props: ComponentProps<typeof GitHubIssueFeedb
     title: title as HTMLInputElement,
     description: description as HTMLTextAreaElement,
     preview: preview as HTMLButtonElement,
+    cancel: cancel as HTMLButtonElement,
     includeSystemInfo,
     includeExtensionInfo,
     getByRole,
@@ -291,4 +300,63 @@ describe('includeExtensionInfo', () => {
       }),
     );
   });
+});
+
+test.each(['bug', 'feature'])('Expect %s to have specific telemetry track events', async category => {
+  const { title, description, preview } = renderGitHubIssueFeedback({
+    category: category,
+    onCloseForm: vi.fn(),
+    contentChange: vi.fn(),
+  });
+
+  expect(window.telemetryTrack).toHaveBeenNthCalledWith(1, `feedback.FormOpened`, { feedbackCategory: category });
+
+  await userEvent.type(title, `${category} title`);
+  await userEvent.type(description, `${category} description`);
+  await userEvent.click(preview);
+
+  await vi.waitFor(() =>
+    expect(window.telemetryTrack).toHaveBeenNthCalledWith(2, `feedback.FormSubmitted`, { feedbackCategory: category }),
+  );
+});
+
+test.each(['bug', 'feature'])(
+  'Expect %s to have specific telemetry track events with error if the preview on GitHub fails',
+  async category => {
+    vi.mocked(window.previewOnGitHub).mockRejectedValue('error: unable to preview on GitHub');
+    const { title, description, preview } = renderGitHubIssueFeedback({
+      category: category,
+      onCloseForm: vi.fn(),
+      contentChange: vi.fn(),
+    });
+
+    expect(window.telemetryTrack).toHaveBeenNthCalledWith(1, `feedback.FormOpened`, { feedbackCategory: category });
+
+    await userEvent.type(title, `${category} title`);
+    await userEvent.type(description, `${category} description`);
+    await userEvent.click(preview);
+
+    await vi.waitFor(() =>
+      expect(window.telemetryTrack).toHaveBeenNthCalledWith(2, `feedback.FormSubmitted`, {
+        feedbackCategory: category,
+        error: 'error: unable to preview on GitHub',
+      }),
+    );
+  },
+);
+
+test('Expect close confirmation to be true if cancel clicked', async () => {
+  const closeMock = vi.fn();
+  const { cancel } = renderGitHubIssueFeedback({
+    category: 'bug',
+    onCloseForm: closeMock,
+    contentChange: vi.fn(),
+  });
+
+  // click on a cancel
+  await userEvent.click(cancel);
+
+  // expect close to have been call with confirmation=true
+  expect(closeMock).toHaveBeenCalledOnce();
+  expect(closeMock).toHaveBeenCalledWith(true);
 });

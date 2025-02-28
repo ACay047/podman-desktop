@@ -27,7 +27,8 @@ import * as tarFs from 'tar-fs';
 
 import type { Directories } from '/@/plugin/directories.js';
 import type { ExtensionsCatalog } from '/@/plugin/extension/catalog/extensions-catalog.js';
-import type { AnalyzedExtension, ExtensionLoader } from '/@/plugin/extension/extension-loader.js';
+import type { AnalyzedExtension } from '/@/plugin/extension/extension-analyzer.js';
+import type { ExtensionLoader } from '/@/plugin/extension/extension-loader.js';
 
 import type { ApiSenderType } from '../api.js';
 import type { ContributionManager } from '../contribution-manager.js';
@@ -113,6 +114,7 @@ export class ExtensionInstaller {
     sendLog: (message: string) => void,
     sendError: (message: string) => void,
     imageName: string,
+    catatlogExtensionId?: string,
   ): Promise<AnalyzedExtension | DockerDesktopContribution | undefined> {
     imageName = imageName.trim();
     sendLog(`Analyzing image ${imageName}...`);
@@ -193,7 +195,12 @@ export class ExtensionInstaller {
     if (isPDExtension) {
       await this.extractExtensionFiles(tmpFolderPath, finalFolderPath, sendLog);
     } else if (isDDExtension) {
-      await this.#dockerDesktopInstaller.extractExtensionFiles(tmpFolderPath, finalFolderPath, sendLog);
+      await this.#dockerDesktopInstaller.extractExtensionFiles(
+        tmpFolderPath,
+        finalFolderPath,
+        sendLog,
+        catatlogExtensionId,
+      );
     }
 
     // delete the tmp folder
@@ -295,11 +302,12 @@ export class ExtensionInstaller {
     sendEnd: (message: string) => void,
     imageName: string,
     extensionAnalyzed?: (extension: AnalyzedExtension) => void,
+    catalogExtensionId?: string,
   ): Promise<void> {
     // now collect all transitive dependencies
     const analyzedExtensions: AnalyzedExtension[] = [];
     const errors: string[] = [];
-    const analyzedExtension = await this.analyzeFromImage(sendLog, sendError, imageName);
+    const analyzedExtension = await this.analyzeFromImage(sendLog, sendError, imageName, catalogExtensionId);
     if (analyzedExtension instanceof DockerDesktopContribution) {
       sendEnd('Docker Desktop Extension Successfully installed.');
       return;
@@ -334,6 +342,7 @@ export class ExtensionInstaller {
 
     // load all extensions
     analyzedExtensions.forEach(extension => this.extensionLoader.ensureExtensionIsEnabled(extension.id));
+
     await this.extensionLoader.loadExtensions(analyzedExtensions);
 
     sendEnd('Extension Successfully installed.');
@@ -343,7 +352,7 @@ export class ExtensionInstaller {
   async init(): Promise<void> {
     ipcMain.on(
       'extension-installer:install-from-image',
-      (event: IpcMainEvent, imageName: string, logCallbackId: number): void => {
+      (event: IpcMainEvent, imageName: string, logCallbackId: number, catalogExtensionId?: string): void => {
         const telemetryData: {
           extensionId?: string;
           error?: string;
@@ -368,7 +377,7 @@ export class ExtensionInstaller {
           }
         };
 
-        this.installFromImage(sendLog, sendError, sendEnd, imageName, extAnalyzed)
+        this.installFromImage(sendLog, sendError, sendEnd, imageName, extAnalyzed, catalogExtensionId)
           .catch((error: unknown) => {
             sendError('' + error);
             telemetryData.error = `${error}`;

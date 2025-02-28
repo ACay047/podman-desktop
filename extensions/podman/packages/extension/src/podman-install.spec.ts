@@ -22,6 +22,7 @@ import * as os from 'node:os';
 import * as extensionApi from '@podman-desktop/api';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import * as extensionObj from './extension';
 import type { InstalledPodman } from './podman-cli';
 import type { Installer, PodmanInfo, UpdateCheck } from './podman-install';
 import {
@@ -43,6 +44,34 @@ const consoleErrorMock = vi.fn();
 const extensionContext = {
   subscriptions: [],
 } as unknown as extensionApi.ExtensionContext;
+
+const provider: extensionApi.Provider = {
+  setContainerProviderConnectionFactory: vi.fn(),
+  setKubernetesProviderConnectionFactory: vi.fn(),
+  registerContainerProviderConnection: vi.fn(),
+  registerKubernetesProviderConnection: vi.fn(),
+  registerLifecycle: vi.fn(),
+  registerInstallation: vi.fn(),
+  registerUpdate: vi.fn(),
+  registerAutostart: vi.fn(),
+  registerCleanup: vi.fn(),
+  dispose: vi.fn(),
+  name: '',
+  id: '',
+  status: 'started',
+  updateStatus: vi.fn(),
+  onDidUpdateStatus: vi.fn(),
+  version: '',
+  updateVersion: vi.fn(),
+  onDidUpdateVersion: vi.fn(),
+  images: {},
+  links: [],
+  detectionChecks: [],
+  updateDetectionChecks: vi.fn(),
+  warnings: [],
+  updateWarnings: vi.fn(),
+  onDidUpdateDetectionChecks: vi.fn(),
+};
 
 // mock ps-list
 vi.mock('ps-list', async () => {
@@ -87,6 +116,9 @@ vi.mock('@podman-desktop/api', async () => {
     },
     Uri: {
       parse: vi.fn(),
+    },
+    context: {
+      setValue: vi.fn(),
     },
   };
 });
@@ -344,7 +376,9 @@ test('expect WSLVersion preflight check return fail result if wsl --version comm
   const winWSLCheck = new WSLVersionCheck();
   const result = await winWSLCheck.execute();
   expect(result.description).equal('WSL version should be >= 1.2.5.');
-  expect(result.docLinksDescription).equal(`Call 'wsl --version' in a terminal to check your wsl version.`);
+  expect(result.docLinksDescription).equal(
+    `Call 'wsl --update' and 'wsl --version' in a terminal to check your wsl version.`,
+  );
 });
 
 test('expect WSLVersion preflight check return fail result if first line output do not contain any colon symbol', async () => {
@@ -357,7 +391,9 @@ test('expect WSLVersion preflight check return fail result if first line output 
   const winWSLCheck = new WSLVersionCheck();
   const result = await winWSLCheck.execute();
   expect(result.description).equal('WSL version should be >= 1.2.5.');
-  expect(result.docLinksDescription).equal(`Call 'wsl --version' in a terminal to check your wsl version.`);
+  expect(result.docLinksDescription).equal(
+    `Call 'wsl --update' and 'wsl --version' in a terminal to check your wsl version.`,
+  );
 });
 
 test('expect WSLVersion preflight check return fail result if first line output do not contain any wsl word', async () => {
@@ -370,7 +406,9 @@ test('expect WSLVersion preflight check return fail result if first line output 
   const winWSLCheck = new WSLVersionCheck();
   const result = await winWSLCheck.execute();
   expect(result.description).equal('WSL version should be >= 1.2.5.');
-  expect(result.docLinksDescription).equal(`Call 'wsl --version' in a terminal to check your wsl version.`);
+  expect(result.docLinksDescription).equal(
+    `Call 'wsl --update' and 'wsl --version' in a terminal to check your wsl version.`,
+  );
 });
 
 test('expect WSLVersion preflight check return fail result if first line output contain an invalid version', async () => {
@@ -1215,4 +1253,25 @@ describe('MacOSInstaller', () => {
     await expect(promiseArg(progress, token)).rejects.toThrow(`Can't find Podman package`);
     expect(promiseResult).toBeDefined();
   });
+});
+
+test('check that podman installation refreshed machine settings', async () => {
+  const podmanInstall = new TestPodmanInstall(extensionContext);
+
+  vi.spyOn(podmanInstall, 'getLastRunInfo').mockResolvedValue({
+    lastUpdateCheck: 0,
+    podmanVersion: '5.0.0',
+  });
+  vi.spyOn(podmanInstall, 'getInstaller').mockReturnValue(undefined);
+
+  // mock existSync being always false (we never find installers)
+  vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+  vi.mocked(extensionApi.window.showInformationMessage).mockResolvedValue('Yes');
+  vi.mocked(extensionApi.process.exec).mockResolvedValue({ command: '', stderr: '', stdout: '5.0.0' });
+  const mock = vi.spyOn(extensionObj, 'calcPodmanMachineSetting');
+
+  await podmanInstall.checkForUpdate(undefined);
+  await podmanInstall.doInstallPodman(provider);
+
+  expect(mock).toHaveBeenCalled();
 });

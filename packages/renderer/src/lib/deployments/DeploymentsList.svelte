@@ -1,75 +1,30 @@
 <script lang="ts">
-import { faTrash } from '@fortawesome/free-solid-svg-icons';
-import {
-  Button,
-  FilteredEmptyScreen,
-  NavPage,
-  Table,
-  TableColumn,
-  TableDurationColumn,
-  TableRow,
-} from '@podman-desktop/ui-svelte';
+import { TableColumn, TableDurationColumn, TableRow } from '@podman-desktop/ui-svelte';
 import moment from 'moment';
-import { onMount } from 'svelte';
 
-import KubeActions from '/@/lib/kube/KubeActions.svelte';
-import KubernetesCurrentContextConnectionBadge from '/@/lib/ui/KubernetesCurrentContextConnectionBadge.svelte';
 import {
   deploymentSearchPattern,
   kubernetesCurrentContextDeploymentsFiltered,
 } from '/@/stores/kubernetes-contexts-state';
 
-import { withBulkConfirmation } from '../actions/BulkActions';
 import DeploymentIcon from '../images/DeploymentIcon.svelte';
+import NameColumn from '../kube/column/Name.svelte';
+import KubernetesObjectsList from '../objects/KubernetesObjectsList.svelte';
 import { DeploymentUtils } from './deployment-utils';
 import DeploymentColumnActions from './DeploymentColumnActions.svelte';
 import DeploymentColumnConditions from './DeploymentColumnConditions.svelte';
-import DeploymentColumnName from './DeploymentColumnName.svelte';
 import DeploymentColumnPods from './DeploymentColumnPods.svelte';
 import DeploymentColumnStatus from './DeploymentColumnStatus.svelte';
 import DeploymentEmptyScreen from './DeploymentEmptyScreen.svelte';
 import type { DeploymentUI } from './DeploymentUI';
 
-export let searchTerm = '';
-$: deploymentSearchPattern.set(searchTerm);
-
-let deployments: DeploymentUI[] = [];
-
-const deploymentUtils = new DeploymentUtils();
-
-onMount(() => {
-  return kubernetesCurrentContextDeploymentsFiltered.subscribe(value => {
-    deployments = value.map(deployment => deploymentUtils.getDeploymentUI(deployment));
-  });
-});
-
-// delete the items selected in the list
-let bulkDeleteInProgress = false;
-async function deleteSelectedDeployments(): Promise<void> {
-  const selectedDeployments = deployments.filter(deployment => deployment.selected);
-  if (selectedDeployments.length === 0) {
-    return;
-  }
-
-  // mark deployments for deletion
-  bulkDeleteInProgress = true;
-  selectedDeployments.forEach(image => (image.status = 'DELETING'));
-  deployments = deployments;
-
-  await Promise.all(
-    selectedDeployments.map(async deployment => {
-      try {
-        await window.kubernetesDeleteDeployment(deployment.name);
-      } catch (e) {
-        console.error('error while deleting deployment', e);
-      }
-    }),
-  );
-  bulkDeleteInProgress = false;
+interface Props {
+  searchTerm?: string;
 }
 
-let selectedItemsNumber: number;
-let table: Table;
+let { searchTerm = '' }: Props = $props();
+
+const deploymentUtils = new DeploymentUtils();
 
 let statusColumn = new TableColumn<DeploymentUI>('Status', {
   align: 'center',
@@ -79,7 +34,7 @@ let statusColumn = new TableColumn<DeploymentUI>('Status', {
 });
 
 let nameColumn = new TableColumn<DeploymentUI>('Name', {
-  renderer: DeploymentColumnName,
+  renderer: NameColumn,
   comparator: (a, b): number => a.name.localeCompare(b.name),
 });
 
@@ -111,51 +66,25 @@ const columns = [
 const row = new TableRow<DeploymentUI>({ selectable: (_deployment): boolean => true });
 </script>
 
-<NavPage bind:searchTerm={searchTerm} title="deployments">
-  <svelte:fragment slot="additional-actions">
-    <KubeActions />
-  </svelte:fragment>
+<KubernetesObjectsList
+  kinds={[{
+    resource: 'deployments',
+    transformer: deploymentUtils.getDeploymentUI,
+    delete: window.kubernetesDeleteDeployment,
+    isResource: (): boolean => true,
+    legacySearchPatternStore: deploymentSearchPattern,
+    legacyObjectStore: kubernetesCurrentContextDeploymentsFiltered,
+  }]}
+  singular="deployment"
+  plural="deployments"
+  icon={DeploymentIcon}
+  searchTerm={searchTerm}
+  columns={columns}
+  row={row}
+  >
+    <!-- eslint-disable-next-line sonarjs/no-unused-vars -->
+    {#snippet emptySnippet()}
+      <DeploymentEmptyScreen />
+    {/snippet}
+  </KubernetesObjectsList>
 
-  <svelte:fragment slot="bottom-additional-actions">
-    {#if selectedItemsNumber > 0}
-      <Button
-        on:click={(): void =>
-          withBulkConfirmation(
-            deleteSelectedDeployments,
-            `delete ${selectedItemsNumber} deployment${selectedItemsNumber > 1 ? 's' : ''}`,
-          )}
-        title="Delete {selectedItemsNumber} selected items"
-        inProgress={bulkDeleteInProgress}
-        icon={faTrash} />
-      <span>On {selectedItemsNumber} selected items.</span>
-    {/if}
-    <div class="flex grow justify-end">
-      <KubernetesCurrentContextConnectionBadge />
-    </div>
-  </svelte:fragment>
-
-  <div class="flex min-w-full h-full" slot="content">
-    <Table
-      kind="deployment"
-      bind:this={table}
-      bind:selectedItemsNumber={selectedItemsNumber}
-      data={deployments}
-      columns={columns}
-      row={row}
-      defaultSortColumn="Name"
-      on:update={(): DeploymentUI[] => (deployments = deployments)}>
-    </Table>
-
-    {#if $kubernetesCurrentContextDeploymentsFiltered.length === 0}
-      {#if searchTerm}
-        <FilteredEmptyScreen
-          icon={DeploymentIcon}
-          kind="deployments"
-          searchTerm={searchTerm}
-          on:resetFilter={(): string => (searchTerm = '')} />
-      {:else}
-        <DeploymentEmptyScreen />
-      {/if}
-    {/if}
-  </div>
-</NavPage>

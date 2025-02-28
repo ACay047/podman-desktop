@@ -141,6 +141,56 @@ export const kubernetesCurrentContextServicesFiltered = derived(
     $services.filter(service => findMatchInLeaves(service, $searchPattern.toLowerCase())),
 );
 
+// CronJobs
+
+export const kubernetesCurrentContextCronJobs = readable<KubernetesObject[]>([], set => {
+  window
+    .kubernetesRegisterGetCurrentContextResources('cronjobs')
+    .then(value => set(value))
+    .catch((err: unknown) => console.log('Error registering Kubernetes cronjobs', err));
+  window.events?.receive('kubernetes-current-context-cronjobs-update', (value: unknown) => {
+    set(value as KubernetesObject[]);
+  });
+  return (): void => {
+    window
+      .kubernetesUnregisterGetCurrentContextResources('cronjobs')
+      .catch((err: unknown) => console.log('Error unregistering Kubernetes cronjobs', err));
+  };
+});
+
+export const cronJobSearchPattern = writable('');
+
+// Current context of CronJobs
+export const kubernetesCurrentContextCronJobsFiltered = derived(
+  [cronJobSearchPattern, kubernetesCurrentContextCronJobs],
+  ([$searchPattern, $cronJobs]) =>
+    $cronJobs.filter(cronJob => findMatchInLeaves(cronJob, $searchPattern.toLowerCase())),
+);
+
+// Jobs
+export const kubernetesCurrentContextJobs = readable<KubernetesObject[]>([], set => {
+  window
+    .kubernetesRegisterGetCurrentContextResources('jobs')
+    .then(value => set(value))
+    .catch((err: unknown) => console.log('Error registering Kubernetes jobs', err));
+  window.events?.receive('kubernetes-current-context-jobs-update', (value: unknown) => {
+    set(value as KubernetesObject[]);
+  });
+  return (): void => {
+    window
+      .kubernetesUnregisterGetCurrentContextResources('jobs')
+      .catch((err: unknown) => console.log('Error unregistering Kubernetes jobs', err));
+  };
+});
+
+export const jobSearchPattern = writable('');
+
+// Current context of jobs
+export const kubernetesCurrentContextJobsFiltered = derived(
+  [jobSearchPattern, kubernetesCurrentContextJobs],
+  ([$searchPattern, $jobs]) => $jobs.filter(job => findMatchInLeaves(job, $searchPattern.toLowerCase())),
+);
+
 // Nodes
 
 export const kubernetesCurrentContextNodes = readable<KubernetesObject[]>([], set => {

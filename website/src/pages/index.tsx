@@ -20,6 +20,7 @@ import React from 'react';
 
 import PodmanAILabBanner from '../components/PodmanAILabBanner';
 import TailWindThemeSelector from '../components/TailWindThemeSelector';
+import { TelemetryLink } from '../components/TelemetryLink';
 
 function DownloadClientLinks(): JSX.Element {
   let operatingSystem = '';
@@ -47,11 +48,13 @@ function DownloadClientLinks(): JSX.Element {
   if (operatingSystem !== '') {
     mainButton = (
       <div>
-        <Link
-          className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-violet-600 border-0 py-4 px-8 mt-6 mb-1 focus:outline-none hover:bg-violet-700 rounded text-lg"
+        <TelemetryLink
+          className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-violet-600 border-0 py-4 px-8 mt-6 mb-1 focus:outline-hidden hover:bg-violet-700 rounded-sm text-lg"
+          eventPath="landing"
+          eventTitle="hero-download"
           to={'/downloads/' + url}>
           <FontAwesomeIcon size="2x" icon={varIcon as IconProp} className="px-2" /> Download Now
-        </Link>
+        </TelemetryLink>
         <caption className="block mt-0 dark:text-gray-400">
           For <strong>{operatingSystem}</strong> <em>(browser-detected)</em>
         </caption>
@@ -60,7 +63,7 @@ function DownloadClientLinks(): JSX.Element {
     otherButton = (
       <div>
         <Link
-          className="underline font-semibold hover:underline ml-4 inline-flex py-2 px-6 my-4  focus:outline-none text-lg"
+          className="underline font-semibold hover:underline ml-4 inline-flex py-2 px-6 my-4  focus:outline-hidden text-lg"
           to="/downloads">
           Other downloads
         </Link>
@@ -70,7 +73,7 @@ function DownloadClientLinks(): JSX.Element {
     mainButton = (
       <div>
         <Link
-          className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 mt-6 mb-1 focus:outline-none hover:bg-purple-600 rounded text-lg"
+          className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 mt-6 mb-1 focus:outline-hidden hover:bg-purple-600 rounded-sm text-lg"
           to="/downloads">
           Download Page
         </Link>
@@ -90,7 +93,7 @@ function DownloadGenericLinks(): JSX.Element {
   return (
     <div className="flex justify-center">
       <Link
-        className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 mt-6 mb-1 focus:outline-none hover:bg-purple-600 rounded text-lg"
+        className="no-underline hover:no-underline inline-flex text-white hover:text-white bg-purple-500 border-0 py-2 px-6 mt-6 mb-1 focus:outline-hidden hover:bg-purple-600 rounded-sm text-lg"
         to="/downloads">
         Download Page
       </Link>
@@ -191,7 +194,7 @@ function Extensibility(): JSX.Element {
           <SectionTitle name="extensibility" />
 
           <h2 className="max-w-lg mb-6 font-sans text-3xl font-light leading-none tracking-tight text-gray-900 dark:text-white sm:text-4xl md:mx-auto">
-            Bring new features to Podman Desktop with extensions.
+            Bring new features to Podman Desktop with extensions
           </h2>
         </div>
 
@@ -239,7 +242,7 @@ function Extensibility(): JSX.Element {
           <div className="flex flex-col items-center">
             <Link
               title="Extend Podman Desktop"
-              className="no-underline hover:no-underline text-gray-900 dark:text-white hover:dark:text-violet-600 "
+              className="no-underline hover:no-underline text-gray-900 dark:text-white dark:hover:text-violet-600 "
               to="/extend">
               <div className="mt-3 text-purple-800 dark:text-purple-400 inline-flex items-center">
                 Learn More
@@ -277,10 +280,10 @@ function Configure(): JSX.Element {
         <div className="container px-5 pb-5 mx-auto">
           <div className="flex flex-wrap sm:-m-4 -mx-4 -mb-10 -mt-4 md:space-y-0 space-y-6">
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCogs} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Registries</h2>
                 <p className="leading-relaxed text-base">
                   <a href="/docs/containers/registries">Manage OCI registries. Add/edit/delete registries.</a>
@@ -289,10 +292,10 @@ function Configure(): JSX.Element {
             </div>
 
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCogs} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Proxy</h2>
                 <p className="leading-relaxed text-base">
                   <a href="/docs/proxy">Configure your proxy settings.</a>
@@ -301,10 +304,10 @@ function Configure(): JSX.Element {
             </div>
 
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCogs} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">
                   Resources Utilization
                 </h2>
@@ -313,10 +316,10 @@ function Configure(): JSX.Element {
             </div>
 
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCogs} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">
                   Container Engines
                 </h2>
@@ -351,10 +354,10 @@ function EnterpriseReady(): JSX.Element {
           </h1>
           <div className="flex flex-wrap sm:-m-4 -mx-4 -mb-10 -mt-4 md:space-y-0 space-y-6">
             <div className="p-4 md:w-1/3 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCertificate} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Code signing</h2>
 
                 <p className="leading-relaxed text-base">
@@ -363,10 +366,10 @@ function EnterpriseReady(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/3 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCloudArrowDown} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100  text-lg title-font font-medium mb-2">Proxy</h2>
                 <p className="leading-relaxed text-base">
                   <a href="/docs/proxy">Configure proxy within the tool. Avoid any painful files to edit.</a>
@@ -374,10 +377,10 @@ function EnterpriseReady(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/3 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faCogs} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Registries</h2>
                 <p className="leading-relaxed text-base">
                   <a href="/docs/proxy">Manage OCI registries. Add/edit/delete registries.</a>
@@ -411,12 +414,12 @@ function RunAnywhere(): JSX.Element {
             <div className="flex rounded-lg h-full bg-zinc-100  hover:bg-purple-500 dark:hover:bg-purple-700 dark:bg-charcoal-800 bg-opacity-60 p-8 flex-col">
               <div className="flex items-center mb-3 flex-col">
                 <FontAwesomeIcon size="4x" icon={faWindows} />
-                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 flex-shrink-0"></div>
+                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 shrink-0"></div>
                 <h2 className=" text-lg title-font font-medium"> Windows</h2>
               </div>
 
-              <div className="flex-grow">
-                <div className="flex-grow w-full">
+              <div className="grow">
+                <div className="grow w-full">
                   <p className="text-base text-center">exe or setup.exe</p>
                 </div>
               </div>
@@ -429,10 +432,10 @@ function RunAnywhere(): JSX.Element {
             <div className="flex rounded-lg h-full bg-zinc-100  hover:bg-purple-500 dark:hover:bg-purple-700 dark:bg-charcoal-800 bg-opacity-60 p-8 flex-col">
               <div className="flex items-center mb-3 flex-col">
                 <FontAwesomeIcon size="4x" icon={faApple} />
-                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 flex-shrink-0"></div>
+                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 shrink-0"></div>
                 <h2 className=" text-lg title-font font-medium"> macOS</h2>
               </div>
-              <div className="flex-grow w-full">
+              <div className="grow w-full">
                 <p className="text-base text-center">arm64, x64 or unified dmg</p>
               </div>
             </div>
@@ -444,10 +447,10 @@ function RunAnywhere(): JSX.Element {
             <div className="flex rounded-lg h-full bg-zinc-100  hover:bg-purple-500 dark:hover:bg-purple-700 dark:bg-charcoal-800 bg-opacity-60 p-8 flex-col">
               <div className="flex items-center mb-3 flex-col">
                 <FontAwesomeIcon size="4x" icon={faLinux} />
-                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 flex-shrink-0"></div>
+                <div className="inline-flex items-center justify-center rounded-full text-gray-900 dark:text-gray-400 shrink-0"></div>
                 <h2 className=" text-lg title-font font-medium"> Linux</h2>
               </div>
-              <div className="flex-grow">
+              <div className="grow">
                 <p className="text-base text-center">Flatpak or AMD64 binary (tar.gz)</p>
               </div>
             </div>
@@ -466,16 +469,16 @@ function MainFeatures(): JSX.Element {
           <SectionTitle name="features" />
 
           <h2 className="max-w-lg mb-6 font-sans text-3xl font-bold leading-none tracking-tight text-gray-900 dark:text-white sm:text-4xl md:mx-auto">
-            Build, run and manage containers.
+            Build, run and manage containers
           </h2>
         </div>
         <div className="container px-5 pb-5 mx-auto">
           <div className="flex flex-wrap sm:-m-4 -mx-4 -mb-10 -mt-4 md:space-y-0 space-y-6">
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faGears} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Build</h2>
                 <p className="leading-relaxed text-base list-disc">
                   <a href="/docs/containers/images/building-an-image">
@@ -486,10 +489,10 @@ function MainFeatures(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faRocket} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Run</h2>
 
                 <p className="leading-relaxed text-base list-disc">
@@ -507,10 +510,10 @@ function MainFeatures(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faGaugeHigh} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Inspect</h2>
                 <p className="leading-relaxed text-base list-disc">
                   <FontAwesomeIcon icon={faRocket} className="text-purple-700 w-3 h-3 mt-1 mr-2" />
@@ -523,10 +526,10 @@ function MainFeatures(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/4 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faDiagramProject} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">Push</h2>
                 <p className="leading-relaxed text-base list-disc">
                   <a href="/docs/containers/images/pushing-an-image-to-a-registry">
@@ -547,7 +550,7 @@ function MainFeatures(): JSX.Element {
         <div className="flex flex-col text-center w-full mb-5">
           <Link
             title="Discover More"
-            className="no-underline hover:no-underline text-gray-900 dark:text-white hover:dark:text-violet-600 "
+            className="no-underline hover:no-underline text-gray-900 dark:text-white dark:hover:text-violet-600 "
             to="/features">
             <div className="mt-3 text-purple-800 dark:text-purple-400 inline-flex items-center">
               Discover More
@@ -583,10 +586,10 @@ function Pods(): JSX.Element {
         <div className="container px-5 pb-5 mx-auto">
           <div className="flex flex-wrap sm:-m-4 -mx-4 -mb-10 -mt-4 md:space-y-0 space-y-6">
             <div className="p-4 md:w-1/2 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-700 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faGears} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">
                   Working with pods
                 </h2>
@@ -601,10 +604,10 @@ function Pods(): JSX.Element {
               </div>
             </div>
             <div className="p-4 md:w-1/2 flex">
-              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 flex-shrink-0">
+              <div className="w-12 h-12 inline-flex items-center justify-center rounded-full bg-gray-700 text-purple-800 mb-4 shrink-0">
                 <FontAwesomeIcon size="2x" icon={faGaugeHigh} className="w-6 h-6 " />
               </div>
-              <div className="flex-grow pl-6">
+              <div className="grow pl-6">
                 <h2 className="text-gray-900 dark:text-gray-100 text-lg title-font font-medium mb-2">
                   Working with Kubernetes
                 </h2>
@@ -635,7 +638,7 @@ function Pods(): JSX.Element {
         <div className="flex flex-col text-center w-full mb-5">
           <Link
             title="Discover More"
-            className="no-underline hover:no-underline text-gray-900 dark:text-white hover:dark:text-violet-600 "
+            className="no-underline hover:no-underline text-gray-900 dark:text-white dark:hover:text-violet-600 "
             to="/features">
             <div className="mt-3 text-purple-800 dark:text-purple-400 inline-flex items-center">
               Discover More

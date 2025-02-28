@@ -23,6 +23,7 @@
 import '@testing-library/jest-dom/vitest';
 
 import { fireEvent, render, screen } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { get } from 'svelte/store';
 import { router } from 'tinro';
 import { beforeAll, beforeEach, describe, expect, type Mock, test, vi } from 'vitest';
@@ -225,6 +226,7 @@ describe.each([
       expect(currentConnectionInfoAfter?.operationInProgress).toBeFalsy();
       expect(currentConnectionInfoAfter?.operationStarted).toBeTruthy();
       expect(currentConnectionInfoAfter?.operationSuccessful).toBeTruthy();
+      expect(currentConnectionInfoAfter?.formData).toBeDefined();
       const closeButton = screen.getByRole('button', { name: 'Close panel' });
       expect(closeButton).toBeInTheDocument();
     }
@@ -506,6 +508,51 @@ test(`Expect create with unchecked and checked checkboxes`, async () => {
   );
 });
 
+test(`cpu value is updated`, async () => {
+  const taskId = 4;
+  const callback = mockCallback(async () => {});
+
+  const booleanProperties: IConfigurationPropertyRecordedSchema[] = [
+    {
+      default: 4,
+      minimum: 1,
+      maximum: 1000,
+      title: 'CPUs',
+      parentId: '',
+      scope: 'ContainerProviderConnectionFactory',
+      id: 'test.cpus',
+      type: 'number',
+      format: 'cpu',
+      description: 'cpus',
+    },
+  ];
+
+  // eslint-disable-next-line @typescript-eslint/await-thenable
+  render(PreferencesConnectionCreationOrEditRendering, {
+    properties: booleanProperties,
+    providerInfo,
+    connectionInfo: undefined,
+    propertyScope,
+    callback,
+    pageIsLoading: false,
+    taskId,
+  });
+  await vi.waitFor(async () => {
+    const editButton = screen.getByRole('button', { name: 'Edit' });
+    await fireEvent.click(editButton);
+  });
+  await vi.waitFor(async () => {
+    const valueInput = screen.getByRole('textbox', { name: 'cpus' });
+    await userEvent.type(valueInput, '99');
+  });
+  const saveButton = screen.getByRole('button', { name: 'Save' });
+  await fireEvent.click(saveButton);
+
+  await vi.waitFor(async () => {
+    screen.getByDisplayValue('499');
+  });
+});
+
 test(`Expect create with unchecked and checked checkboxes having multiple scopes`, async () => {
   const taskId = 4;
   const callback = mockCallback(async () => {});
@@ -569,6 +616,104 @@ test(`Expect create with unchecked and checked checkboxes having multiple scopes
   expect(callback).toBeCalledWith(
     'test',
     { 'test.factoryProperty': '0', 'test.checked': true, 'test.unchecked': false },
+    expect.anything(),
+    eventCollect,
+    undefined,
+    taskId,
+  );
+});
+
+test('Expect form data saved in store when submitting the form and when the task ends', async () => {
+  let providedKeyLogger: ((key: symbol, eventName: LoggerEventName, args: string[]) => void) | undefined;
+
+  const callback = mockCallback(async keyLogger => {
+    providedKeyLogger = keyLogger;
+  });
+
+  const taskId = 1;
+  const label = 'Create';
+
+  render(PreferencesConnectionCreationOrEditRendering, {
+    properties,
+    providerInfo,
+    propertyScope,
+    callback,
+    pageIsLoading: false,
+    taskId,
+  });
+  await vi.waitUntil(() => screen.queryByRole('textbox', { name: 'test.factoryProperty' }));
+  const factoryProperty = screen.getByRole('textbox', { name: 'test.factoryProperty' });
+  await userEvent.type(factoryProperty, '2');
+
+  const createButton = screen.getByRole('button', { name: `${label}` });
+  expect(createButton).toBeInTheDocument();
+  // click on the button
+  await fireEvent.click(createButton);
+
+  // do we have a task
+  const currentConnectionInfoMap = get(operationConnectionsInfo);
+  expect(currentConnectionInfoMap).toBeDefined();
+  const currentConnectionInfo = currentConnectionInfoMap.get(taskId);
+  expect(currentConnectionInfo).toBeDefined();
+  if (currentConnectionInfo) {
+    expect(currentConnectionInfo.formData).toBeDefined();
+    expect(currentConnectionInfo.formData).toStrictEqual({ 'test.factoryProperty': '2' });
+    expect(providedKeyLogger).toBeDefined();
+
+    // simulate end of the create operation
+    if (providedKeyLogger) {
+      providedKeyLogger(currentConnectionInfo.operationKey, 'finish', []);
+    }
+
+    // expect it is successful
+    const currentConnectionInfoAfterMap = get(operationConnectionsInfo);
+    expect(currentConnectionInfoAfterMap).toBeDefined();
+    const currentConnectionInfoAfter = currentConnectionInfoAfterMap.get(taskId);
+
+    expect(currentConnectionInfoAfter?.formData).toBeDefined();
+    expect(currentConnectionInfoAfter?.formData).toStrictEqual({ 'test.factoryProperty': '2' });
+  }
+});
+
+test('Expect form data saved in store to be repopulated when reopening a task', async () => {
+  let providedKeyLogger: ((key: symbol, eventName: LoggerEventName, args: string[]) => void) | undefined;
+  const callback = mockCallback(async keyLogger => {
+    providedKeyLogger = keyLogger;
+  });
+
+  const taskId = 1;
+
+  const operationConnectionsInfoMock = {
+    operationKey: Symbol(),
+    providerInfo,
+    connectionInfo: undefined,
+    properties,
+    propertyScope: 'DEFAULT',
+    operationInProgress: false,
+    operationSuccessful: false,
+    operationStarted: false,
+    errorMessage: '',
+    formData: { 'test.factoryProperty': '5' },
+  };
+  operationConnectionsInfo.update(map => map.set(taskId, operationConnectionsInfoMock));
+
+  render(PreferencesConnectionCreationOrEditRendering, {
+    properties,
+    providerInfo,
+    propertyScope,
+    callback,
+    pageIsLoading: false,
+    taskId,
+  });
+  await vi.waitUntil(() => screen.queryByRole('textbox', { name: 'test.factoryProperty' }));
+
+  const createButton = screen.getByRole('button', { name: 'Create' });
+  expect(createButton).toBeInTheDocument();
+  // click on the button
+  await fireEvent.click(createButton);
+  expect(callback).toBeCalledWith(
+    'test',
+    { 'test.factoryProperty': '5' },
     expect.anything(),
     eventCollect,
     undefined,

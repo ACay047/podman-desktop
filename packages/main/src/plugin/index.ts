@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2022-2024 Red Hat, Inc.
+ * Copyright (C) 2022-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,10 @@ import type {
   Context as KubernetesContext,
   KubernetesObject,
   V1ConfigMap,
+  V1CronJob,
   V1Deployment,
   V1Ingress,
+  V1Job,
   V1NamespaceList,
   V1Node,
   V1PersistentVolumeClaim,
@@ -81,7 +83,7 @@ import type { ContributionInfo } from '/@api/contribution-info.js';
 import type { DockerSocketMappingStatusInfo } from '/@api/docker-compatibility-info.js';
 import type { ExtensionDevelopmentFolderInfo } from '/@api/extension-development-folders-info.js';
 import type { ExtensionInfo } from '/@api/extension-info.js';
-import type { GitHubIssue } from '/@api/feedback.js';
+import type { FeedbackProperties, GitHubIssue } from '/@api/feedback.js';
 import type { HistoryInfo } from '/@api/history-info.js';
 import type { IconInfo } from '/@api/icon-info.js';
 import type { ImageCheckerInfo } from '/@api/image-checker-info.js';
@@ -93,9 +95,11 @@ import type { KubeContext } from '/@api/kubernetes-context.js';
 import type { ContextHealth } from '/@api/kubernetes-contexts-healths.js';
 import type { ContextPermission } from '/@api/kubernetes-contexts-permissions.js';
 import type { ContextGeneralState, ResourceName } from '/@api/kubernetes-contexts-states.js';
+import type { KubernetesNavigationRequest } from '/@api/kubernetes-navigation.js';
 import type { ForwardConfig, ForwardOptions } from '/@api/kubernetes-port-forward-model.js';
 import type { ResourceCount } from '/@api/kubernetes-resource-count.js';
 import type { KubernetesContextResources } from '/@api/kubernetes-resources.js';
+import type { KubernetesTroubleshootingInformation } from '/@api/kubernetes-troubleshooting.js';
 import type { ManifestCreateOptions, ManifestInspectInfo, ManifestPushOptions } from '/@api/manifest-info.js';
 import type { NetworkInspectInfo } from '/@api/network-info.js';
 import type { NotificationCard, NotificationCardOptions } from '/@api/notification.js';
@@ -150,6 +154,7 @@ import { EditorInit } from './editor-init.js';
 import type { Emitter } from './events/emitter.js';
 import { ExtensionsCatalog } from './extension/catalog/extensions-catalog.js';
 import type { CatalogExtension } from './extension/catalog/extensions-catalog-api.js';
+import { ExtensionAnalyzer } from './extension/extension-analyzer.js';
 import { ExtensionDevelopmentFolders } from './extension/extension-development-folders.js';
 import { ExtensionsUpdater } from './extension/updater/extensions-updater.js';
 import { Featured } from './featured/featured.js';
@@ -181,6 +186,7 @@ import type { StatusBarEntryDescriptor } from './statusbar/statusbar-registry.js
 import { StatusBarRegistry } from './statusbar/statusbar-registry.js';
 import { NotificationRegistry } from './tasks/notification-registry.js';
 import { ProgressImpl } from './tasks/progress-impl.js';
+import type { TaskAction } from './tasks/tasks.js';
 import { PAGE_EVENT_TYPE, Telemetry } from './telemetry/telemetry.js';
 import { TerminalInit } from './terminal-init.js';
 import { TrayIconColor } from './tray-icon-color.js';
@@ -242,27 +248,16 @@ export class PluginSystem {
     return window.webContents;
   }
 
-  // encode the error to be sent over IPC
-  // this is needed because on the client it will display
-  // a generic error message 'Error invoking remote method' and
-  // it's not useful for end user
-  encodeIpcError(e: unknown): { name?: string; message: unknown; extra?: Record<string, unknown> } {
-    let builtError;
-    if (e instanceof Error) {
-      builtError = { name: e.name, message: e.message, extra: { ...e } };
-    } else {
-      builtError = { message: e };
-    }
-    return builtError;
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ipcHandle(channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<void> | any): any {
+  ipcHandle(channel: string, listener: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<void> | any): void {
     ipcMain.handle(channel, async (...args) => {
       try {
         return { result: await Promise.resolve(listener(...args)) };
-      } catch (e) {
-        return { error: this.encodeIpcError(e) };
+      } catch (error) {
+        // From error instance only message property will get through.
+        // Sending non error instance as a message property of an object triggers
+        // coercion of message property to String.
+        return error instanceof Error ? { error } : { error: { message: error } };
       }
     });
   }
@@ -559,7 +554,7 @@ export class PluginSystem {
       }
     });
 
-    statusBarRegistry.setEntry('help', false, -1, undefined, 'Help', 'fa fa-question-circle', true, 'help', undefined);
+    statusBarRegistry.setEntry('help', false, -1, undefined, 'Help', 'fa fa-question-circle', true, 'help');
 
     statusBarRegistry.setEntry(
       'troubleshooting',
@@ -570,7 +565,6 @@ export class PluginSystem {
       'fa fa-lightbulb',
       true,
       'troubleshooting',
-      undefined,
     );
 
     statusBarRegistry.setEntry(
@@ -582,7 +576,6 @@ export class PluginSystem {
       'fa fa-comment',
       true,
       'feedback',
-      undefined,
     );
 
     // Init update logic
@@ -673,8 +666,20 @@ export class PluginSystem {
       onboardingRegistry,
     );
 
+    commandRegistry.registerCommand('kubernetes-navigation', (navRequest: KubernetesNavigationRequest) => {
+      apiSender.send('kubernetes-navigation', navRequest);
+    });
+
+    navigationManager.registerRoute({ routeId: 'kubernetes', commandId: 'kubernetes-navigation' });
+
+    const extensionAnalyzer = new ExtensionAnalyzer();
+
     const extensionWatcher = new ExtensionWatcher(fileSystemMonitoring);
-    const extensionDevelopmentFolders = new ExtensionDevelopmentFolders(configurationRegistry, apiSender);
+    const extensionDevelopmentFolders = new ExtensionDevelopmentFolders(
+      configurationRegistry,
+      extensionAnalyzer,
+      apiSender,
+    );
     extensionDevelopmentFolders.init();
 
     this.extensionLoader = new ExtensionLoader(
@@ -715,9 +720,9 @@ export class PluginSystem {
       certificates,
       extensionWatcher,
       extensionDevelopmentFolders,
+      extensionAnalyzer,
     );
     await this.extensionLoader.init();
-    extensionDevelopmentFolders.setExtensionLoader(this.extensionLoader);
 
     const feedback = new FeedbackHandler(this.extensionLoader);
 
@@ -1095,6 +1100,47 @@ export class PluginSystem {
         return containerProviderRegistry.resolveShortnameImage(providerContainerConnectionInfo, shortName);
       },
     );
+
+    commandRegistry.registerCommand(
+      'pullImage',
+      async (
+        providerContainerConnectionInfo: ProviderContainerConnectionInfo,
+        imageName: string,
+        callback: (event: PullEvent) => void,
+        platform?: string,
+        taskActionName?: string,
+        taskActionCallback?: () => void,
+      ) => {
+        if (!providerContainerConnectionInfo || !imageName || typeof callback !== 'function') {
+          return;
+        }
+
+        let taskAction: TaskAction | undefined;
+
+        if (taskActionName && typeof taskActionName === 'string' && typeof taskActionCallback === 'function') {
+          taskAction = {
+            name: taskActionName,
+            execute: taskActionCallback,
+          };
+        }
+
+        const task = taskManager.createTask({
+          title: `Pulling ${imageName}`,
+          action: taskAction,
+        });
+
+        return containerProviderRegistry
+          .pullImage(providerContainerConnectionInfo, imageName, callback, platform)
+          .then(result => {
+            task.status = 'success';
+            return result;
+          })
+          .catch((error: unknown) => {
+            task.error = `Something went wrong while trying to pull ${imageName}: ${error};`;
+            throw error;
+          });
+      },
+    );
     this.ipcHandle(
       'container-provider-registry:pullImage',
       async (
@@ -1104,7 +1150,8 @@ export class PluginSystem {
         callbackId: number,
         platform?: string,
       ): Promise<void> => {
-        return containerProviderRegistry.pullImage(
+        return commandRegistry.executeCommand(
+          'pullImage',
           providerContainerConnectionInfo,
           imageName,
           (event: PullEvent) => {
@@ -2281,7 +2328,7 @@ export class PluginSystem {
 
         const providerName = providerRegistry.getProviderInfo(internalProviderId)?.name;
         const task = taskManager.createTask({
-          title: `Creating ${providerName ? providerName : 'Container'} provider`,
+          title: `Creating ${providerName ?? 'Container'} provider`,
           action: {
             name: 'Open task',
             execute: () => {
@@ -2339,7 +2386,7 @@ export class PluginSystem {
 
         const providerName = providerRegistry.getProviderInfo(internalProviderId)?.name;
         const task = taskManager.createTask({
-          title: `Creating ${providerName ? providerName : 'Kubernetes'} provider`,
+          title: `Creating ${providerName ?? 'Kubernetes'} provider`,
           action: {
             name: 'Open task',
             execute: () => {
@@ -2385,10 +2432,6 @@ export class PluginSystem {
       },
     );
 
-    this.ipcHandle('kubernetes-client:listPods', async (): Promise<PodInfo[]> => {
-      return kubernetesClient.listPods();
-    });
-
     this.ipcHandle('kubernetes-client:listRoutes', async (): Promise<V1Route[]> => {
       return kubernetesClient.listRoutes();
     });
@@ -2412,6 +2455,14 @@ export class PluginSystem {
 
     this.ipcHandle('kubernetes-client:deleteConfigMap', async (_listener, name: string): Promise<void> => {
       return kubernetesClient.deleteConfigMap(name);
+    });
+
+    this.ipcHandle('kubernetes-client:deleteCronJob', async (_listener, name: string): Promise<void> => {
+      return kubernetesClient.deleteCronJob(name);
+    });
+
+    this.ipcHandle('kubernetes-client:deleteJob', async (_listener, name: string): Promise<void> => {
+      return kubernetesClient.deleteJob(name);
     });
 
     this.ipcHandle('kubernetes-client:deleteSecret', async (_listener, name: string): Promise<void> => {
@@ -2438,6 +2489,20 @@ export class PluginSystem {
       'kubernetes-client:readNamespacedSecret',
       async (_listener, name: string, namespace: string): Promise<V1Secret | undefined> => {
         return kubernetesClient.readNamespacedSecret(name, namespace);
+      },
+    );
+
+    this.ipcHandle(
+      'kubernetes-client:readNamespacedCronJob',
+      async (_listener, name: string, namespace: string): Promise<V1CronJob | undefined> => {
+        return kubernetesClient.readNamespacedCronJob(name, namespace);
+      },
+    );
+
+    this.ipcHandle(
+      'kubernetes-client:readNamespacedJob',
+      async (_listener, name: string, namespace: string): Promise<V1Job | undefined> => {
+        return kubernetesClient.readNamespacedJob(name, namespace);
       },
     );
 
@@ -2480,7 +2545,6 @@ export class PluginSystem {
       },
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.ipcHandle(
       'kubernetes-client:createResourcesFromFile',
       async (_listener, context: string, file: string, namespace: string): Promise<void> => {
@@ -2620,8 +2684,8 @@ export class PluginSystem {
 
     this.ipcHandle(
       'kubernetes:getResources',
-      async (_listener, resourceName: string): Promise<KubernetesContextResources[]> => {
-        return kubernetesClient.getResources(resourceName);
+      async (_listener, contextNames: string[], resourceName: string): Promise<KubernetesContextResources[]> => {
+        return kubernetesClient.getResources(contextNames, resourceName);
       },
     );
 
@@ -2676,7 +2740,7 @@ export class PluginSystem {
       return kubernetesClient.refreshContextState(context);
     });
 
-    this.ipcHandle('feedback:send', async (_listener, feedbackProperties: unknown): Promise<void> => {
+    this.ipcHandle('feedback:send', async (_listener, feedbackProperties: FeedbackProperties): Promise<void> => {
       return telemetry.sendFeedback(feedbackProperties);
     });
 
@@ -2696,9 +2760,12 @@ export class PluginSystem {
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.ipcHandle('telemetry:track', async (_listener, event: string, eventProperties?: any): Promise<void> => {
-      return telemetry.track(event, eventProperties);
-    });
+    this.ipcHandle(
+      'telemetry:track',
+      async (_listener, event: string, eventProperties?: FeedbackProperties): Promise<void> => {
+        return telemetry.track(event, eventProperties);
+      },
+    );
 
     this.ipcHandle('telemetry:page', async (_listener, name: string): Promise<void> => {
       return telemetry.track(PAGE_EVENT_TYPE, { name: name });
@@ -2775,6 +2842,13 @@ export class PluginSystem {
       }
       window.close();
     });
+
+    this.ipcHandle(
+      'navigation:navigateToRoute',
+      async (_listener, routeId: string, ...args: unknown[]): Promise<void> => {
+        return navigationManager.navigateToRoute(routeId, ...args);
+      },
+    );
 
     this.ipcHandle('onboardingRegistry:listOnboarding', async (): Promise<OnboardingInfo[]> => {
       return onboardingRegistry.listOnboarding();
@@ -2924,6 +2998,13 @@ export class PluginSystem {
       'extension-development-folders:removeDevelopmentFolder',
       async (_listener: unknown, path: string): Promise<void> => {
         return extensionDevelopmentFolders.removeDevelopmentFolder(path);
+      },
+    );
+
+    this.ipcHandle(
+      'kubernetes:getTroubleshootingInformation',
+      async (_listener: unknown): Promise<KubernetesTroubleshootingInformation> => {
+        return kubernetesClient.getTroubleshootingInformation();
       },
     );
 
