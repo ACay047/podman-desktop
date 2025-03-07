@@ -22,7 +22,8 @@ Make sure you have:
 1. Go to the **Containers** component page.
 1. Click the name of the container, such as `python-app`.
    ![python app container](img/python-app-container.png)
-1. Analyze the logs of the container.
+1. Select the **Logs** tab to analyze the logs of the container.
+1. Optional: Type any keyword in the box to search for it in the logs.
    ![analyze the logs](img/analyzing-the-logs.png)
 1. Click the **close** icon on the right side of the page.
 

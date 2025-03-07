@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@
 
 import { ContainerState } from '../model/core/states';
 import type { ContainerInteractiveParams } from '../model/core/types';
-import { ContainerDetailsPage } from '../model/pages/container-details-page';
 import { createKindCluster, deleteCluster } from '../utility/cluster-operations';
 import { expect as playExpect, test } from '../utility/fixtures';
+import { deployContainerToCluster } from '../utility/kubernetes';
 import { deleteContainer, deleteImage, ensureCliInstalled } from '../utility/operations';
 import { waitForPodmanMachineStartup } from '../utility/wait';
 
@@ -32,13 +32,13 @@ const RESOURCE_NAME: string = 'kind';
 const IMAGE_TO_PULL: string = 'ghcr.io/linuxcontainers/alpine';
 const IMAGE_TAG: string = 'latest';
 const CONTAINER_NAME: string = 'alpine-container';
-const NAMESPACE: string = 'default';
-const DEPLOYED_POD_NAME: string = `${CONTAINER_NAME} ${KIND_NODE} ${NAMESPACE}`;
+const DEPLOYED_POD_NAME: string = CONTAINER_NAME;
 const CONTAINER_START_PARAMS: ContainerInteractiveParams = {
   attachTerminal: false,
 };
 
 const skipKindInstallation = process.env.SKIP_KIND_INSTALL === 'true';
+const providerTypeGHA = process.env.KIND_PROVIDER_GHA ?? '';
 
 test.beforeAll(async ({ runner, welcomePage, page, navigationBar }) => {
   test.setTimeout(350_000);
@@ -54,7 +54,10 @@ test.beforeAll(async ({ runner, welcomePage, page, navigationBar }) => {
   }
 
   if (process.env.GITHUB_ACTIONS && process.env.RUNNER_OS === 'Linux') {
-    await createKindCluster(page, CLUSTER_NAME, false, CLUSTER_CREATION_TIMEOUT, { useIngressController: false });
+    await createKindCluster(page, CLUSTER_NAME, false, CLUSTER_CREATION_TIMEOUT, {
+      providerType: providerTypeGHA,
+      useIngressController: false,
+    });
   } else {
     await createKindCluster(page, CLUSTER_NAME, true, CLUSTER_CREATION_TIMEOUT);
   }
@@ -93,13 +96,7 @@ test.describe.serial('Deploy a container to the Kind cluster', { tag: '@k8s_e2e'
     await playExpect.poll(async () => containerDetails.getState()).toBe(ContainerState.Running);
   });
 
-  test('Deploy the container ', async ({ page, navigationBar }) => {
-    const containerDetailsPage = new ContainerDetailsPage(page, CONTAINER_NAME);
-    await playExpect(containerDetailsPage.heading).toBeVisible();
-    const deployToKubernetesPage = await containerDetailsPage.openDeployToKubernetesPage();
-    await deployToKubernetesPage.deployPod(CONTAINER_NAME, { useKubernetesServices: true }, KUBERNETES_CONTEXT);
-
-    const podsPage = await navigationBar.openPods();
-    await playExpect.poll(async () => podsPage.deployedPodExists(DEPLOYED_POD_NAME, 'kubernetes')).toBeTruthy();
+  test('Deploy the container ', async ({ page }) => {
+    await deployContainerToCluster(page, CONTAINER_NAME, KUBERNETES_CONTEXT, DEPLOYED_POD_NAME);
   });
 });

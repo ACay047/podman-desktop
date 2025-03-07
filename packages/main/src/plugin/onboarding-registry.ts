@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2023 Red Hat, Inc.
+ * Copyright (C) 2023-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import * as path from 'node:path';
 
-import type { AnalyzedExtension } from '/@/plugin/extension/extension-loader.js';
+import type { AnalyzedExtension } from '/@/plugin/extension/extension-analyzer.js';
 import type { Onboarding, OnboardingInfo, OnboardingStatus } from '/@api/onboarding.js';
 
 import { getBase64Image } from '../util.js';
@@ -56,6 +55,7 @@ export class OnboardingRegistry {
     return {
       ...onboarding,
       extension: extension.id,
+      removable: extension.removable,
       name: extension.name,
       displayName: extension.manifest?.displayName ?? extension.name,
       description: extension.manifest?.description ?? '',
@@ -91,7 +91,22 @@ export class OnboardingRegistry {
   }
 
   listOnboarding(): OnboardingInfo[] {
-    return Array.from(this.onboardingInfos.values());
+    const comparePriorities = (p1: number, p2: number): number => {
+      if (p1 === p2) {
+        return 0;
+      }
+      return p1 < p2 ? -1 : 1;
+    };
+    return Array.from(this.onboardingInfos.values()).toSorted((a, b) => {
+      if (a.removable && b.removable) {
+        return comparePriorities(a.priority ?? 100, b.priority ?? 100);
+      } else if (a.removable && !b.removable) {
+        return 1;
+      } else if (!a.removable && b.removable) {
+        return -1;
+      }
+      return comparePriorities(a.priority ?? 100, b.priority ?? 100);
+    });
   }
 
   updateStepState(status: OnboardingStatus, extension: string, stepId?: string): void {

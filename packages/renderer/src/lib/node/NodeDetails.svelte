@@ -1,11 +1,13 @@
 <script lang="ts">
-import type { V1Node } from '@kubernetes/client-node';
+import type { CoreV1Event, KubernetesObject, V1Node } from '@kubernetes/client-node';
 import { StatusIcon, Tab } from '@podman-desktop/ui-svelte';
-import { onMount } from 'svelte';
+import { onDestroy, onMount } from 'svelte';
 import { router } from 'tinro';
 import { stringify } from 'yaml';
 
+import { listenResource } from '/@/lib/kube/resource-listen';
 import { kubernetesCurrentContextEvents, kubernetesCurrentContextNodes } from '/@/stores/kubernetes-contexts-state';
+import type { IDisposable } from '/@api/disposable.js';
 
 import Route from '../../Route.svelte';
 import MonacoEditor from '../editor/MonacoEditor.svelte';
@@ -28,21 +30,39 @@ let detailsPage: DetailsPage | undefined = $state(undefined);
 let kubeNode: V1Node | undefined = $state(undefined);
 let kubeError: string | undefined = $state(undefined);
 
-let events: EventUI[] = $derived($kubernetesCurrentContextEvents.filter(ev => ev.involvedObject.uid === node?.uid));
+let events = $state<EventUI[]>([]);
+let listener: IDisposable | undefined;
 
-onMount(() => {
+onMount(async () => {
   const nodeUtils = new NodeUtils();
-  // loading node info
-  return kubernetesCurrentContextNodes.subscribe(nodes => {
-    const matchingNode = nodes.find(dep => dep.metadata?.name === name);
-    if (matchingNode) {
-      node = nodeUtils.getNodeUI(matchingNode);
-      loadDetails().catch((err: unknown) => console.error(`Error getting node details ${node?.name}`, err));
-    } else if (detailsPage) {
-      // the node has been deleted
-      detailsPage.close();
-    }
+  listener = await listenResource({
+    resourceName: 'nodes',
+    name,
+    listenEvents: true,
+    legacyResourceStore: kubernetesCurrentContextNodes,
+    legacyEventsStore: kubernetesCurrentContextEvents,
+    onResourceNotFound: () => {
+      if (detailsPage) {
+        // the service has been deleted
+        detailsPage.close();
+      }
+    },
+    onResourceUpdated: (resource: KubernetesObject, isExperimental: boolean) => {
+      node = nodeUtils.getNodeUI(resource);
+      if (isExperimental) {
+        kubeNode = resource;
+      } else {
+        loadDetails().catch((err: unknown) => console.error(`Error getting node details ${node?.name}`, err));
+      }
+    },
+    onEventsUpdated: (updatedEvents: CoreV1Event[]) => {
+      events = updatedEvents;
+    },
   });
+});
+
+onDestroy(() => {
+  listener?.dispose();
 });
 
 async function loadDetails(): Promise<void> {

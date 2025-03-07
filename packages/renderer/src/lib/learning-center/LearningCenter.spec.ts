@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import '@testing-library/jest-dom/vitest';
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
@@ -27,11 +25,12 @@ import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import learningCenter from '../../../../main/src/plugin/learning-center/guides.json';
 import LearningCenter from './LearningCenter.svelte';
 
-vi.mock('../ui/animations', () => ({
-  fadeSlide: (): {
-    delay: number;
-    duration: number;
-  } => ({
+vi.mock('svelte/transition', () => ({
+  slide: (): { delay: number; duration: number } => ({
+    delay: 0,
+    duration: 0,
+  }),
+  fade: (): { delay: number; duration: number } => ({
     delay: 0,
     duration: 0,
   }),

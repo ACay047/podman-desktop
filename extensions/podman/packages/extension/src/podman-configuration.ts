@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2022-2024 Red Hat, Inc.
+ * Copyright (C) 2022-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,11 @@ import * as path from 'node:path';
 
 import type { ProxySettings } from '@podman-desktop/api';
 import * as extensionApi from '@podman-desktop/api';
+import { Mutex } from 'async-mutex';
 import * as toml from 'smol-toml';
+
+import type { RegistryConfiguration } from './configuration/registry-configuration';
+import { RegistryConfigurationImpl } from './configuration/registry-configuration';
 
 const configurationRosetta = 'setting.rosetta';
 
@@ -30,10 +34,23 @@ const configurationRosetta = 'setting.rosetta';
  * Manages access to the containers.conf configuration file used to configure Podman
  */
 export class PodmanConfiguration {
+  private mutex: Mutex = new Mutex();
+
+  #extensionContext: extensionApi.ExtensionContext;
+  #registryConfiguration: RegistryConfiguration;
+
+  constructor(extensionContext: extensionApi.ExtensionContext) {
+    this.#extensionContext = extensionContext;
+    this.#registryConfiguration = new RegistryConfigurationImpl();
+  }
+
   async init(): Promise<void> {
     let httpProxy = undefined;
     let httpsProxy = undefined;
     let noProxy = undefined;
+
+    const disposables = await this.#registryConfiguration.init();
+    this.#extensionContext.subscriptions.push(...disposables);
 
     // we receive an update for the current proxy settings
     extensionApi.proxy.onDidUpdateProxy(async (proxySettings: ProxySettings) => {
@@ -57,14 +74,17 @@ export class PodmanConfiguration {
       const tomlConfigFile = toml.parse(containersConfigFile);
 
       if (tomlConfigFile?.engine) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const engineConf: any = tomlConfigFile.engine;
+        const engineConf = tomlConfigFile.engine;
 
         // env in engine section
         // env are written like array of key=value ['https_proxy=http://10.0.0.244:9090', 'http_proxy=http://10.0.0.244:9090']
-        if (engineConf.env && Array.isArray(engineConf.env)) {
-          const envArray: string[] = engineConf.env;
+        if (typeof engineConf === 'object' && 'env' in engineConf && engineConf.env && Array.isArray(engineConf.env)) {
+          const envArray = engineConf.env;
           envArray.forEach(envVar => {
+            if (typeof envVar !== 'string') {
+              console.error(`podman configuration env is not a string but ${typeof envVar}: ${envVar}`);
+              return;
+            }
             const split = envVar.split('=');
             if (split.length === 2) {
               if (split[0] === 'https_proxy') {
@@ -105,6 +125,15 @@ export class PodmanConfiguration {
     }
   }
 
+  async updateProxySettings(proxy: undefined | ProxySettings): Promise<void> {
+    const release = await this.mutex.acquire();
+    try {
+      await this.doUpdateProxySettings(proxy);
+    } finally {
+      release();
+    }
+  }
+
   async handleRosettaSetting(): Promise<void> {
     // If the configuration does not exist, we will default to true
     // if true, when we do updateRosettaSetting, if there is no configuration file, it will do nothing.
@@ -117,9 +146,8 @@ export class PodmanConfiguration {
       // Read the file
       const containersConfigFile = await this.readContainersConfigFile();
       const tomlConfigFile = toml.parse(containersConfigFile);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const machine: any = tomlConfigFile.machine;
-      if (machine && 'rosetta' in machine) {
+      const machine = tomlConfigFile.machine;
+      if (machine && typeof machine === 'object' && 'rosetta' in machine) {
         const val = machine['rosetta'];
         if (typeof val === 'boolean') {
           return val;
@@ -189,7 +217,7 @@ export class PodmanConfiguration {
     }
   }
 
-  async updateProxySettings(proxySettings: ProxySettings | undefined): Promise<void> {
+  async doUpdateProxySettings(proxySettings: ProxySettings | undefined): Promise<void> {
     // create empty config file
     const containersConfContent = {
       containers: {},
@@ -338,5 +366,10 @@ export class PodmanConfiguration {
         }
       });
     });
+  }
+
+  // expose RegistryConfiguration interface
+  get registryConfiguration(): RegistryConfiguration {
+    return this.#registryConfiguration;
   }
 }

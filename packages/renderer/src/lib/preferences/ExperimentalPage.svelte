@@ -66,7 +66,7 @@ $effect(() => {
           <span class="font-semibold">Enable all experimental features</span>
         </div>
         <div class="pt-1 text-[color:var(--pd-invert-content-card-text)] text-sm pr-2">
-          <Markdown markdown="Enable the section to turn on **all experimental features** and give feedback to developers. Or select individual features to try bellow." />
+          <Markdown markdown="Enable the section to turn on **all experimental features** and give feedback to developers. Or select individual features to try below." />
         </div>
       </div>
       <div class="flex flex-row text-start items-center justify-start">
@@ -86,7 +86,7 @@ $effect(() => {
     {#each experimental as configItem}
       <div>
         <div class="bg-[var(--pd-invert-content-card-bg)] rounded-md mt-2 ml-2">
-          <PreferencesRenderingItem record={configItem} />
+          <PreferencesRenderingItem title="full" record={configItem} />
         </div>
       </div>
     {/each}

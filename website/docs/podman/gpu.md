@@ -145,10 +145,12 @@ Using the GPU functionality requires a specialized Containerfile containing a [p
 FROM fedora:40
 USER 0
 
-# Install the patched mesa-krunkit drivers
 RUN dnf -y install dnf-plugins-core && \
-    dnf -y copr enable slp/mesa-krunkit && \
-    dnf -y install mesa-vulkan-drivers vulkan-loader-devel vulkan-headers vulkan-tools vulkan-loader && \
+    dnf -y install dnf-plugin-versionlock && \
+    dnf -y install mesa-vulkan-drivers vulkan-loader-devel vulkan-headers vulkan-tools vulkan-loader glslc && \
+    dnf -y copr enable slp/mesa-krunkit fedora-40-aarch64 && \
+    dnf -y downgrade mesa-vulkan-drivers.aarch64 --repo=copr:copr.fedorainfracloud.org:slp:mesa-krunkit && \
+    dnf versionlock mesa-vulkan-drivers && \
     dnf clean all
 ```
 
@@ -159,7 +161,7 @@ RUN dnf -y install dnf-plugins-core && \
 3. Verify you can see the GPU by running a test container:
 
 ```sh
-$  podman run --rm -it --device /dev/dri --name gpu-info quay.io/slopezpa/fedora-vgpu vulkaninfo | grep "GPU"
+$  podman run --rm -it --device /dev/dri --name gpu-info <gpu-container-image>  vulkaninfo | grep "GPU"
 ```
 
 Example output:
@@ -191,7 +193,9 @@ Important note that the virtualized GPU (Virtio-GPU Venus (Apple M1 Pro)) only s
 #### Procedure
 
 1. Install the latest NVIDIA GPU Driver for your OS.
+
 2. Follow the instructions on [installing the NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) in relation to your Linux distribution.
+
 3. Generate the CDI Specification file for Podman:
 
 This file is saved either to /etc/cdi or /var/run/cdi on your Linux distribution and is used for Podman to detect your GPU(s).
@@ -209,6 +213,23 @@ $ nvidia-ctk cdi list
 ```
 
 More information as well as troubleshooting tips can be found [on the official NVIDIA CDI guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html).
+
+4. Configure SELinux (if applicable)
+
+On SELinux-enabled OSes, such as OSs from the Fedora family, the default policy usually disallows containers to have direct access to devices. We make sure it's allowed.
+
+Check whether SELinux is installed and enabled:
+
+```sh
+$ getenforce
+```
+
+- If `getenforce` is not found or its output is `Permissive` or `Disabled`, no action is needed.
+- If the output is `Enforcing`, configure SELinux to enable device access for containers:
+
+```sh
+$ sudo setsebool -P container_use_devices true
+```
 
 #### Verification
 

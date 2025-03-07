@@ -1,10 +1,11 @@
 <script lang="ts">
-import { Button, Checkbox, Dropdown, ErrorMessage, Input, StatusIcon } from '@podman-desktop/ui-svelte';
+import { Button, Checkbox, ErrorMessage, Input, StatusIcon } from '@podman-desktop/ui-svelte';
 import { ContainerIcon } from '@podman-desktop/ui-svelte/icons';
 import { onDestroy, onMount } from 'svelte';
 import type { Unsubscriber } from 'svelte/store';
 import { router } from 'tinro';
 
+import ContainerConnectionDropdown from '/@/lib/forms/ContainerConnectionDropdown.svelte';
 import { handleNavigation } from '/@/navigation';
 import { NavigationPage } from '/@api/navigation-page';
 import type { ProviderContainerConnectionInfo, ProviderInfo } from '/@api/provider-info';
@@ -227,7 +228,7 @@ function navigateToContainers(): void {
           <WarningMessage class="flex flex-row w-full  mb-2" error={getWarningText()} />
         {/if}
         <div class="mb-2">
-          <span class="block font-semibold rounded text-[var(--pd-content-card-header-text)]"
+          <span class="block font-semibold rounded-sm text-[var(--pd-content-card-header-text)]"
             >Name of the pod:</span>
         </div>
         <div class="mb-4">
@@ -242,7 +243,7 @@ function navigateToContainers(): void {
 
         <div class="mb-2">
           <span
-            class="block font-semibold rounded text-[var(--pd-content-card-header-text)]"
+            class="block font-semibold rounded-sm text-[var(--pd-content-card-header-text)]"
             aria-label="Containers">Containers to replicate to the pod:</span>
         </div>
         <div class="w-full bg-[var(--pd-content-card-inset-bg)] mb-4 max-h-40 overflow-y-auto">
@@ -259,7 +260,7 @@ function navigateToContainers(): void {
         {#if mapPortExposed.size > 0}
           <div class="mb-2">
             <span
-              class="block font-semibold rounded text-[var(--pd-content-card-header-text)]"
+              class="block font-semibold rounded-sm text-[var(--pd-content-card-header-text)]"
               aria-label="Exposed ports">All selected ports will be exposed:</span>
           </div>
           <div class="bg-[var(--pd-content-card-inset-bg)] mb-4 max-h-40 overflow-y-auto">
@@ -280,17 +281,14 @@ function navigateToContainers(): void {
       {#if providerConnections.length > 1}
         <label
           for="providerConnectionName"
-          class="block mb-2 font-semibold rounded text-[var(--pd-content-card-header-text)]"
+          class="block mb-2 font-semibold rounded-sm text-[var(--pd-content-card-header-text)]"
           >Container engine:</label>
-        <Dropdown
+        <ContainerConnectionDropdown
           class="w-full"
           name="providerChoice"
           bind:value={selectedProvider}
-          options={providerConnections.map(providerConnection => ({
-            label: providerConnection.name,
-            value: providerConnection,
-          }))}>
-        </Dropdown>
+          connections={providerConnections}
+        />
       {/if}
       {#if providerConnections.length === 1 && selectedProviderConnection?.name}
         <input type="hidden" name="providerChoice" readonly bind:value={selectedProviderConnection.name} />

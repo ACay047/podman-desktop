@@ -62,6 +62,8 @@ export const dispatchAllResources: ResourcesDispatchOptions = {
   ingresses: true,
   routes: true,
   configmaps: true,
+  cronjobs: true,
+  jobs: true,
   secrets: true,
   events: true,
   // add new resources here when adding new informers
@@ -214,6 +216,8 @@ export class ContextsStatesRegistry {
           ingresses: [],
           routes: [],
           configmaps: [],
+          jobs: [],
+          cronjobs: [],
           secrets: [],
           events: [],
           // add new resources here when adding new informers

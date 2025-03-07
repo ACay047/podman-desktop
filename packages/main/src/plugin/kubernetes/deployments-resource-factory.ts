@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024, 2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,6 +48,7 @@ export class DeploymentsResourceFactory extends ResourceFactoryBase implements R
     this.setInformer({
       createInformer: this.createInformer,
     });
+    this.setIsActive(this.isDeploymentActive);
   }
 
   createInformer(kubeconfig: KubeConfigSingleContext): ResourceInformer<V1Deployment> {
@@ -55,6 +56,10 @@ export class DeploymentsResourceFactory extends ResourceFactoryBase implements R
     const apiClient = kubeconfig.getKubeConfig().makeApiClient(AppsV1Api);
     const listFn = (): Promise<V1DeploymentList> => apiClient.listNamespacedDeployment({ namespace });
     const path = `/apis/apps/v1/namespaces/${namespace}/deployments`;
-    return new ResourceInformer<V1Deployment>(kubeconfig, path, listFn, 'deployments');
+    return new ResourceInformer<V1Deployment>({ kubeconfig, path, listFn, kind: 'Deployment', plural: 'deployments' });
+  }
+
+  isDeploymentActive(deployment: V1Deployment): boolean {
+    return (deployment.spec?.replicas ?? 0) > 0;
   }
 }

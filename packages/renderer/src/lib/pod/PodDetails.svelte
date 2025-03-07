@@ -9,18 +9,16 @@ import PodIcon from '../images/PodIcon.svelte';
 import DetailsPage from '../ui/DetailsPage.svelte';
 import StateChange from '../ui/StateChange.svelte';
 import { getTabUrl, isTabSelected } from '../ui/Util';
-import KubernetesTerminalBrowser from './KubernetesTerminalBrowser.svelte';
 import { PodUtils } from './pod-utils';
 import PodActions from './PodActions.svelte';
 import PodDetailsInspect from './PodDetailsInspect.svelte';
 import PodDetailsKube from './PodDetailsKube.svelte';
 import PodDetailsLogs from './PodDetailsLogs.svelte';
-import PodDetailsSummary from './PodDetailsSummary.svelte';
 import type { PodInfoUI } from './PodInfoUI';
+import PodmanPodDetailsSummary from './PodmanPodDetailsSummary.svelte';
 
 export let podName: string;
 export let engineId: string;
-export let kind: string;
 
 let pod: PodInfoUI;
 let detailsPage: DetailsPage;
@@ -37,9 +35,7 @@ onMount(() => {
 
   // loading pod info
   return podsInfos.subscribe(pods => {
-    const matchingPod = pods.find(
-      podInPods => podInPods.Name === podName && podInPods.engineId === engineId && kind === podInPods.kind,
-    );
+    const matchingPod = pods.find(podInPods => podInPods.Name === podName && podInPods.engineId === engineId);
     if (matchingPod) {
       try {
         pod = podUtils.getPodInfoUI(matchingPod);
@@ -79,16 +75,10 @@ onMount(() => {
       <Tab title="Logs" selected={isTabSelected($router.path, 'logs')} url={getTabUrl($router.path, 'logs')} />
       <Tab title="Inspect" selected={isTabSelected($router.path, 'inspect')} url={getTabUrl($router.path, 'inspect')} />
       <Tab title="Kube" selected={isTabSelected($router.path, 'kube')} url={getTabUrl($router.path, 'kube')} />
-      {#if pod.kind === 'kubernetes'}
-        <Tab
-          title="Terminal"
-          selected={isTabSelected($router.path, 'k8s-terminal')}
-          url={getTabUrl($router.path, 'k8s-terminal')} />
-      {/if}
     </svelte:fragment>
     <svelte:fragment slot="content">
       <Route path="/summary" breadcrumb="Summary" navigationHint="tab">
-        <PodDetailsSummary pod={pod} />
+        <PodmanPodDetailsSummary pod={pod} />
       </Route>
       <Route path="/logs" breadcrumb="Logs" navigationHint="tab">
         <PodDetailsLogs pod={pod} />
@@ -98,9 +88,6 @@ onMount(() => {
       </Route>
       <Route path="/kube" breadcrumb="Kube" navigationHint="tab">
         <PodDetailsKube pod={pod} />
-      </Route>
-      <Route path="/k8s-terminal" breadcrumb="Terminal" navigationHint="tab">
-        <KubernetesTerminalBrowser pod={pod} />
       </Route>
     </svelte:fragment>
   </DetailsPage>

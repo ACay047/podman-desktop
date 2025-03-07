@@ -29,9 +29,11 @@ import datejs from 'date.js';
 import type { ContainerAttachOptions, ImageBuildOptions } from 'dockerode';
 import Dockerode from 'dockerode';
 import moment from 'moment';
+import { coerce, gtr } from 'semver';
 import StreamValues from 'stream-json/streamers/StreamValues.js';
 import type { Headers, Pack, PackOptions } from 'tar-fs';
 
+import { KubePlayContext } from '/@/plugin/podman/kube.js';
 import type { ProviderRegistry } from '/@/plugin/provider-registry.js';
 import type {
   ContainerCreateOptions,
@@ -109,6 +111,9 @@ export class ContainerProviderRegistry {
   private readonly _onEvent = new Emitter<JSONEvent>();
   readonly onEvent: Event<JSONEvent> = this._onEvent.event;
 
+  private readonly _onApiAttached = new Emitter<string>();
+  readonly onApiAttached: Event<string> = this._onApiAttached.event;
+
   // delay in ms before retrying to connect to the provider when /events connection fails
   protected retryDelayEvents: number = 5000;
 
@@ -129,6 +134,7 @@ export class ContainerProviderRegistry {
 
   protected containerProviders: Map<string, containerDesktopAPI.ContainerProviderConnection> = new Map();
   protected internalProviders: Map<string, InternalContainerProvider> = new Map();
+  protected notify: boolean = true;
 
   // map of streams per container id
   protected streamsPerContainerId: Map<string, NodeJS.ReadWriteStream> = new Map();
@@ -147,6 +153,8 @@ export class ContainerProviderRegistry {
 
     eventEmitter.on('event', (jsonEvent: JSONEvent) => {
       nbEvents++;
+      // reconnected
+      this.notify = true;
       // do not log healthcheck(health_status) events
       // as it's too verbose/repeating a lot
       if (jsonEvent.status !== 'health_status') {
@@ -204,8 +212,11 @@ export class ContainerProviderRegistry {
 
     api.getEvents((err, stream) => {
       if (err) {
-        console.log('error is', err);
-        errorCallback(new Error('Error in handling events', err));
+        if (this.notify) {
+          console.log('error is', err);
+          errorCallback(new Error('Error in handling events', err));
+          this.notify = false;
+        }
       }
 
       stream?.on('error', error => {
@@ -300,6 +311,11 @@ export class ContainerProviderRegistry {
 
     this.handleEvents(internalProvider.api, errorHandler);
     this.apiSender.send('provider-change', {});
+    this._onApiAttached.fire(internalProvider.id);
+  }
+
+  isApiAttached(id: string): boolean {
+    return !!this.internalProviders.get(id)?.api;
   }
 
   registerContainerConnection(
@@ -367,6 +383,12 @@ export class ContainerProviderRegistry {
     });
   }
 
+  notifyConsole(message: string): void {
+    if (this.notify) {
+      console.log(message);
+    }
+  }
+
   // do not use inspect information
   async listSimpleContainers(abortController?: AbortController): Promise<SimpleContainerInfo[]> {
     let telemetryOptions = {};
@@ -391,7 +413,7 @@ export class ContainerProviderRegistry {
             }),
           );
         } catch (error) {
-          console.log('error in engine', provider.name, error);
+          this.notifyConsole(`error in engine ${provider.name} ${error}`);
           telemetryOptions = { error: error };
           return [];
         }
@@ -550,7 +572,7 @@ export class ContainerProviderRegistry {
             }),
           );
         } catch (error) {
-          console.log('error in engine', provider.name, error);
+          this.notifyConsole(`error in engine ${provider.name} ${error}`);
           telemetryOptions = { error: error };
           return [];
         }
@@ -589,7 +611,7 @@ export class ContainerProviderRegistry {
             return imageInfo;
           });
         } catch (error) {
-          console.log('error in engine', provider.name, error);
+          this.notifyConsole(`error in engine ${provider.name} ${error}`);
           telemetryOptions = { error: error };
           return [];
         }
@@ -712,7 +734,7 @@ export class ContainerProviderRegistry {
             return podInfo;
           });
         } catch (error) {
-          console.log('error in engine', provider.name, error);
+          this.notifyConsole(`error in engine ${provider.name} ${error}`);
           telemetryOptions = { error: error };
           return [];
         }
@@ -835,7 +857,7 @@ export class ContainerProviderRegistry {
           });
           return { Volumes: volumeInfos, Warnings: volumeListInfo.Warnings, engineName, engineId };
         } catch (error) {
-          console.log('error in engine', provider.name, error);
+          this.notifyConsole(`error in engine ${provider.name} ${error}`);
           telemetryOptions = { error: error };
           return [];
         }
@@ -2412,24 +2434,59 @@ export class ContainerProviderRegistry {
     }
   }
 
+  protected async isTarPlayBuildSupported(internalProvider: InternalContainerProvider): Promise<boolean> {
+    if (!internalProvider.api || !internalProvider.libpodApi) {
+      throw new Error('No provider with a running engine');
+    }
+
+    const version = await internalProvider.api.version();
+
+    // let's nicely format it
+    const coerced = coerce(version.Version);
+    if (!coerced) throw new Error(`api version cannot be coerced ${version.Version}`);
+
+    return gtr(coerced.version, '5.3.0');
+  }
+
   async playKube(
     kubernetesYamlFilePath: string,
     selectedProvider: ProviderContainerConnectionInfo,
+    options?: {
+      build?: boolean;
+    },
   ): Promise<PlayKubeInfo> {
-    let telemetryOptions = {};
+    const telemetryOptions: Record<string, unknown> = {};
     try {
-      // grab all connections
-      const matchingContainerProvider = Array.from(this.internalProviders.values()).find(
-        containerProvider =>
-          containerProvider.connection.endpoint.socketPath === selectedProvider.endpoint.socketPath &&
-          containerProvider.connection.name === selectedProvider.name,
-      );
-      if (!matchingContainerProvider?.libpodApi) {
+      const provider = this.getMatchingContainerProvider(selectedProvider);
+      if (!provider?.libpodApi) {
         throw new Error('No provider with a running engine');
       }
-      return matchingContainerProvider.libpodApi.playKube(kubernetesYamlFilePath);
-    } catch (error) {
-      telemetryOptions = { error: error };
+
+      // if we don't build, we use the file directory
+      if (!options?.build) {
+        return provider.libpodApi.playKube(kubernetesYamlFilePath);
+      }
+
+      // ensure build support is true, otherwise let's throw a nice user friendly error
+      const buildSupported: boolean = await this.isTarPlayBuildSupported(provider);
+      if (!buildSupported)
+        throw new Error(
+          `kube play build is not supported on ${provider.connection.name}: Podman 5.3.0 and above supports this feature`,
+        );
+
+      const kubePlay = KubePlayContext.fromFile(kubernetesYamlFilePath);
+      await kubePlay.init();
+
+      // if we have no context let's just use the the yaml
+      if (kubePlay.getBuildContexts().length === 0) {
+        return provider.libpodApi.playKube(kubernetesYamlFilePath);
+      }
+
+      return provider.libpodApi.playKube(kubePlay.build(), {
+        build: true,
+      });
+    } catch (error: unknown) {
+      telemetryOptions['error'] = error;
       throw error;
     } finally {
       this.telemetryService.track('playKube', telemetryOptions);

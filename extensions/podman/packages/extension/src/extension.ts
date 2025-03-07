@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2022-2024 Red Hat, Inc.
+ * Copyright (C) 2022-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,25 +24,27 @@ import * as path from 'node:path';
 
 import type { ContainerEngineInfo, RunError } from '@podman-desktop/api';
 import * as extensionApi from '@podman-desktop/api';
+import { Mutex } from 'async-mutex';
 import { compareVersions } from 'compare-versions';
 
 import type { PodmanExtensionApi, PodmanRunOptions } from '../../api/src/podman-extension-api';
-import { SequenceCheck } from './base-check';
+import { SequenceCheck } from './checks/base-check';
+import { getDetectionChecks } from './checks/detection-checks';
+import { PodmanCleanupMacOS } from './cleanup/podman-cleanup-macos';
+import { PodmanCleanupWindows } from './cleanup/podman-cleanup-windows';
 import { getSocketCompatibility } from './compatibility-mode';
-import { getDetectionChecks } from './detection-checks';
-import { KrunkitHelper } from './krunkit-helper';
-import { PodmanBinaryLocationHelper } from './podman-binary-location-helper';
-import { PodmanCleanupMacOS } from './podman-cleanup-macos';
-import { PodmanCleanupWindows } from './podman-cleanup-windows';
+import { KrunkitHelper } from './helpers/krunkit-helper';
+import { PodmanBinaryLocationHelper } from './helpers/podman-binary-location-helper';
+import { PodmanInfoHelper } from './helpers/podman-info-helper';
+import { QemuHelper } from './helpers/qemu-helper';
+import { WslHelper } from './helpers/wsl-helper';
 import type { InstalledPodman } from './podman-cli';
 import { getPodmanCli, getPodmanInstallation } from './podman-cli';
 import { PodmanConfiguration } from './podman-configuration';
-import { PodmanInfoHelper } from './podman-info-helper';
 import { HyperVCheck, PodmanInstall, WSL2Check, WSLVersionCheck } from './podman-install';
 import { ProviderConnectionShellAccessImpl } from './podman-machine-stream';
-import { PodmanRemoteConnections } from './podman-remote-connections';
-import { QemuHelper } from './qemu-helper';
 import { RegistrySetup } from './registry-setup';
+import { PodmanRemoteConnections } from './remote/podman-remote-connections';
 import {
   appConfigDir,
   appHomeDir,
@@ -54,7 +56,6 @@ import {
   VMTYPE,
 } from './util';
 import { getDisguisedPodmanInformation, getSocketPath, isDisguisedPodman } from './warnings';
-import { WslHelper } from './wsl-helper';
 
 type StatusHandler = (name: string, event: extensionApi.ProviderConnectionStatus) => void;
 
@@ -85,8 +86,6 @@ const containerProviderConnections = new Map<string, extensionApi.ContainerProvi
 let isDisguisedPodmanSocket = true;
 let disguisedPodmanSocketWatcher: extensionApi.FileSystemWatcher | undefined;
 
-let autostartInProgress = false;
-
 // Configuration buttons
 const configurationCompatibilityMode = 'setting.dockerCompatibility';
 let telemetryLogger: extensionApi.TelemetryLogger | undefined;
@@ -96,6 +95,8 @@ const qemuHelper = new QemuHelper();
 const krunkitHelper = new KrunkitHelper();
 const podmanBinaryHelper = new PodmanBinaryLocationHelper();
 const podmanInfoHelper = new PodmanInfoHelper();
+
+const updateMachinesMutex = new Mutex();
 
 let createWSLMachineOptionSelected = false;
 let wslAndHypervEnabledContextValue = false;
@@ -182,6 +183,14 @@ function notifySetupPodman(): void {
 }
 
 export async function updateMachines(
+  provider: extensionApi.Provider,
+  podmanConfiguration: PodmanConfiguration,
+): Promise<void> {
+  // do not run multiple updates at the same time
+  await updateMachinesMutex.runExclusive(async () => doUpdateMachines(provider, podmanConfiguration));
+}
+
+async function doUpdateMachines(
   provider: extensionApi.Provider,
   podmanConfiguration: PodmanConfiguration,
 ): Promise<void> {
@@ -675,14 +684,12 @@ export async function monitorMachines(
 ): Promise<void> {
   // call us again
   if (!stopLoop) {
-    // skip the update during the auto start process
-    if (!autostartInProgress) {
-      try {
-        await updateMachines(provider, podmanConfiguration);
-      } catch (error) {
-        // ignore the update of machines
-      }
+    try {
+      await updateMachines(provider, podmanConfiguration);
+    } catch (error) {
+      // ignore the update of machines
     }
+
     await timeout(5000);
     monitorMachines(provider, podmanConfiguration).catch((error: unknown) => {
       console.error('Error monitoring podman machines', error);
@@ -915,7 +922,7 @@ export async function startMachine(
       // propagate the error
       throw err;
     }
-    await doHandleError(provider, machineInfo, typeof err === 'string' ? err : (err as RunError));
+    await doHandleError(provider, machineInfo, podmanConfiguration, typeof err === 'string' ? err : (err as RunError));
   } finally {
     // send telemetry event
     const endTime = performance.now();
@@ -953,6 +960,7 @@ export async function stopMachine(
 async function doHandleError(
   provider: extensionApi.Provider,
   machineInfo: MachineInfo,
+  podmanConfiguration: PodmanConfiguration,
   error: string | RunError,
 ): Promise<void> {
   let errText: string = '';
@@ -964,7 +972,7 @@ async function doHandleError(
   }
 
   if (errText.toLowerCase().includes('wsl bootstrap script failed: exit status 0xffffffff')) {
-    const handled = await doHandleWSLDistroNotFoundError(provider, machineInfo);
+    const handled = await doHandleWSLDistroNotFoundError(provider, machineInfo, podmanConfiguration);
     if (handled) {
       return;
     }
@@ -978,6 +986,7 @@ async function doHandleError(
 async function doHandleWSLDistroNotFoundError(
   provider: extensionApi.Provider,
   machineInfo: MachineInfo,
+  podmanConfiguration: PodmanConfiguration,
 ): Promise<boolean> {
   const result = await extensionApi.window.showInformationMessage(
     `Error while starting Podman Machine '${machineInfo.name}'. The WSL bootstrap script failed: exist status 0xffffffff. The machine is probably broken and should be deleted and reinitialized. Do you want to recreate it?`,
@@ -993,12 +1002,15 @@ async function doHandleWSLDistroNotFoundError(
           provider.updateStatus('configuring');
           await extensionApi.process.exec(getPodmanCli(), ['machine', 'rm', '-f', machineInfo.name]);
           progress.report({ increment: 40 });
-          await createMachine({
-            'podman.factory.machine.name': machineInfo.name,
-            'podman.factory.machine.cpus': machineInfo.cpus,
-            'podman.factory.machine.memory': machineInfo.memory,
-            'podman.factory.machine.diskSize': machineInfo.diskSize,
-          });
+          await createMachine(
+            {
+              'podman.factory.machine.name': machineInfo.name,
+              'podman.factory.machine.cpus': machineInfo.cpus,
+              'podman.factory.machine.memory': machineInfo.memory,
+              'podman.factory.machine.diskSize': machineInfo.diskSize,
+            },
+            podmanConfiguration,
+          );
         } catch (error) {
           console.error(error);
         } finally {
@@ -1366,7 +1378,7 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
     },
   ];
 
-  const podmanConfiguration = new PodmanConfiguration();
+  const podmanConfiguration = new PodmanConfiguration(extensionContext);
   await podmanConfiguration.init();
 
   const provider = extensionApi.provider.createProvider(providerOptions);
@@ -1456,8 +1468,10 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
     extensionContext.subscriptions.push(command);
   }
 
-  const doAutoStart = async (logger: extensionApi.Logger): Promise<void> => {
-    autostartInProgress = true;
+  const doAutoStart = async (
+    logger: extensionApi.Logger,
+    autostartContext: extensionApi.AutostartContext,
+  ): Promise<void> => {
     // If autostart has been enabled for the machine, try to start it.
     try {
       await updateMachines(provider, podmanConfiguration);
@@ -1490,6 +1504,7 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
             containerProviderConnection,
           );
           await startMachine(provider, podmanConfiguration, machineInfo, context, logger, undefined, true);
+          autostartContext.updateContainerConnection(containerProviderConnection);
           autoMachineStarted = true;
           autoMachineName = machineName;
         }
@@ -1498,13 +1513,8 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
   };
 
   provider.registerAutostart({
-    start: async (logger: extensionApi.Logger) => {
-      try {
-        autostartInProgress = true;
-        await doAutoStart(logger);
-      } finally {
-        autostartInProgress = false;
-      }
+    start: async (logger: extensionApi.Logger, autostartContext: extensionApi.AutostartContext) => {
+      await doAutoStart(logger, autostartContext);
     },
   });
 
@@ -1559,10 +1569,18 @@ export async function start(
   // create machines on Linux via Podman Desktop, however we will still support
   // the lifecycle management of one.
   if (extensionApi.env.isMac || extensionApi.env.isWindows) {
+    const handleCreateMachine = (
+      params: Record<string, unknown>,
+      logger?: extensionApi.Logger,
+      token?: extensionApi.CancellationToken,
+    ): Promise<void> => {
+      return createMachine(params, podmanConfiguration, logger, token);
+    };
+
     provider.setContainerProviderConnectionFactory(
       {
-        initialize: () => createMachine({}),
-        create: createMachine,
+        initialize: () => handleCreateMachine({}),
+        create: handleCreateMachine,
         creationDisplayName: 'Podman machine',
       },
       {
@@ -1690,14 +1708,14 @@ export async function start(
       for (const res of result) {
         const warning = {
           state: res.successful ? 'successful' : 'failed',
-          description: res.description ? res.description : res.name,
+          description: res.description ?? res.name,
           docDescription: res.docLinksDescription,
           docLinks: res.docLinks,
           command: res.fixCommand,
         };
         warnings.push(warning);
         if (!res.successful) {
-          telemetryRecords[res.name] = res.description ? res.description : res.name;
+          telemetryRecords[res.name] = res.description ?? res.name;
         }
       }
 
@@ -1882,6 +1900,12 @@ export async function deactivate(): Promise<void> {
       console.log('stopped autostarted machine', autoMachineName);
     }
   });
+
+  // cleanup
+  listeners.clear();
+  podmanMachinesInfo.clear();
+  currentConnections.clear();
+  containerProviderConnections.clear();
 }
 
 const PODMAN_MINIMUM_VERSION_FOR_NOW_FLAG_INIT = '4.0.0';
@@ -1896,6 +1920,13 @@ const PODMAN_MINIMUM_VERSION_FOR_ROOTFUL_MACHINE_INIT = '4.1.0';
 // Checks if rootful machine init is supported.
 export function isRootfulMachineInitSupported(podmanVersion: string): boolean {
   return compareVersions(podmanVersion, PODMAN_MINIMUM_VERSION_FOR_ROOTFUL_MACHINE_INIT) >= 0;
+}
+
+const PODMAN_MINIMUM_VERSION_FOR_PLAYBOOK_MACHINE_INIT = '5.4.0';
+
+// Checks if playbook option is supported.
+export function isPlaybookMachineInitSupported(podmanVersion: string): boolean {
+  return compareVersions(podmanVersion, PODMAN_MINIMUM_VERSION_FOR_PLAYBOOK_MACHINE_INIT) >= 0;
 }
 
 const PODMAN_MINIMUM_VERSION_FOR_NEW_SOCKET_LOCATION = '4.5.0';
@@ -1917,9 +1948,13 @@ export function isUserModeNetworkingSupported(podmanVersion: string): boolean {
 
 const PODMAN_MINIMUM_VERSION_FOR_LIBKRUN_SUPPORT = '5.2.0-rc1';
 
-// Checks if libkrun is supported. Only Mac platform allows this parameter to be tuned
+// Checks if libkrun is supported. Only Mac/silicon platform allows this parameter to be tuned
 export function isLibkrunSupported(podmanVersion: string): boolean {
-  return extensionApi.env.isMac && compareVersions(podmanVersion, PODMAN_MINIMUM_VERSION_FOR_LIBKRUN_SUPPORT) >= 0;
+  return (
+    extensionApi.env.isMac &&
+    os.arch() === 'arm64' &&
+    compareVersions(podmanVersion, PODMAN_MINIMUM_VERSION_FOR_LIBKRUN_SUPPORT) >= 0
+  );
 }
 
 // Set wslEnabled. Used for testing purposes
@@ -2032,22 +2067,25 @@ export function sendTelemetryRecords(
 }
 
 export async function createMachine(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  params: { [key: string]: any },
+  params: { [key: string]: unknown },
+  podmanConfiguration: PodmanConfiguration,
   logger?: extensionApi.Logger,
   token?: extensionApi.CancellationToken,
 ): Promise<void> {
-  const parameters = [];
+  const parameters: string[] = [];
   parameters.push('machine');
   parameters.push('init');
 
   const telemetryRecords: Record<string, unknown> = {};
 
   let provider: string | undefined;
-  if (params['podman.factory.machine.provider']) {
+  if (params['podman.factory.machine.provider'] && typeof params['podman.factory.machine.provider'] === 'string') {
     provider = getProviderByLabel(params['podman.factory.machine.provider']);
     telemetryRecords.provider = provider;
-  } else if (params['podman.factory.machine.win.provider']) {
+  } else if (
+    params['podman.factory.machine.win.provider'] &&
+    typeof params['podman.factory.machine.win.provider'] === 'string'
+  ) {
     provider = params['podman.factory.machine.win.provider'];
     telemetryRecords.provider = provider;
   } else {
@@ -2061,7 +2099,7 @@ export async function createMachine(
   }
 
   // cpus
-  if (params['podman.factory.machine.cpus']) {
+  if (params['podman.factory.machine.cpus'] && typeof params['podman.factory.machine.cpus'] === 'string') {
     let cpusValue = params['podman.factory.machine.cpus'];
     // libkrun has an issue that prevent to start a machine that has been created with more than 8 cpus, so we limit it here
     if (provider === VMTYPE.LIBKRUN && parseInt(cpusValue) > 8) {
@@ -2091,11 +2129,14 @@ export async function createMachine(
   }
 
   // image-path
-  if (params['podman.factory.machine.image-path']) {
+  if (params['podman.factory.machine.image-path'] && typeof params['podman.factory.machine.image-path'] === 'string') {
     parameters.push('--image-path');
     parameters.push(params['podman.factory.machine.image-path']);
     telemetryRecords.imagePath = 'custom';
-  } else if (params['podman.factory.machine.image-uri']) {
+  } else if (
+    params['podman.factory.machine.image-uri'] &&
+    typeof params['podman.factory.machine.image-uri'] === 'string'
+  ) {
     const imageUri = params['podman.factory.machine.image-uri'].trim();
     parameters.push('--image-path');
     if (imageUri.startsWith('https://') || imageUri.startsWith('http://')) {
@@ -2122,16 +2163,25 @@ export async function createMachine(
     telemetryRecords.imagePath = 'default';
   }
 
+  const installedPodman = await getPodmanInstallation();
+  const version = installedPodman?.version;
   if (params['podman.factory.machine.rootful'] === undefined) {
     // should be rootful mode if version supports this mode and only if rootful is not provided (false or true)
-    const installedPodman = await getPodmanInstallation();
-    const version: string | undefined = installedPodman?.version;
     if (version) {
       const isRootfulSupported = isRootfulMachineInitSupported(version);
       if (isRootfulSupported) {
         params['podman.factory.machine.rootful'] = true;
       }
     }
+  }
+
+  // if playbook option is supported
+  if (version && isPlaybookMachineInitSupported(version)) {
+    // add the playbook option
+    parameters.push('--playbook');
+    // get the playbook script
+    const playbookPath = await podmanConfiguration.registryConfiguration.getPlaybookScriptPath();
+    parameters.push(playbookPath);
   }
 
   if (params['podman.factory.machine.rootful']) {
@@ -2149,7 +2199,7 @@ export async function createMachine(
   }
 
   // name at the end
-  if (params['podman.factory.machine.name']) {
+  if (params['podman.factory.machine.name'] && typeof params['podman.factory.machine.name'] === 'string') {
     parameters.push(params['podman.factory.machine.name']);
     telemetryRecords.customName = params['podman.factory.machine.name'];
     telemetryRecords.defaultName = false;

@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2022 Red Hat, Inc.
+ * Copyright (C) 2022-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
 
+import type { RequestOptions } from 'node:http';
+
 import type { ManifestCreateOptions, ManifestInspectInfo, ManifestPushOptions } from '@podman-desktop/api';
+import type DockerModem from 'docker-modem';
+import type { DialOptions } from 'docker-modem';
 import type { VolumeCreateOptions, VolumeCreateResponse } from 'dockerode';
 import Dockerode from 'dockerode';
 
@@ -375,7 +379,7 @@ export interface LibPod {
   resolveShortnameImage(shortname: string): Promise<{ Names: string[] }>;
   restartPod(podId: string): Promise<void>;
   generateKube(names: string[]): Promise<string>;
-  playKube(yamlContentFilePath: string): Promise<PlayKubeInfo>;
+  playKube(file: string | NodeJS.ReadableStream, options?: { build?: boolean }): Promise<PlayKubeInfo>;
   pruneAllImages(dangling: boolean): Promise<void>;
   podmanInfo(): Promise<Info>;
   getImages(options: GetImagesOptions): Promise<NodeJS.ReadableStream>;
@@ -386,15 +390,33 @@ export interface LibPod {
   podmanRemoveManifest(manifestName: string): Promise<void>;
 }
 
+// change the method from private to public as we're overriding it
+interface DockerodeInternalsModem extends Omit<DockerModem, 'buildRequest'> {
+  buildRequest(
+    options: RequestOptions,
+    context: DockerModem.DialOptions,
+    data: string | Buffer | NodeJS.ReadableStream | undefined,
+    callback?: DockerModem.RequestCallback,
+  ): void;
+}
+
+// add the ability to patch some modem methods
+export interface DockerodeInternals extends Omit<Dockerode, 'modem'>, LibPod {
+  modem: DockerodeInternalsModem;
+}
+
+const wrapAs = <T>(data: unknown): T => {
+  return data as T;
+};
+
 // tweak Dockerode by adding the support of libpod API
 // WARNING: make sure to not override existing functions
 export class LibpodDockerode {
   // setup the libpod API
   enhancePrototypeWithLibPod(): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const prototypeOfDockerode = Dockerode.prototype as any;
+    const prototypeOfDockerode = Dockerode.prototype as unknown as DockerodeInternals;
     // add listPodmanContainers
-    prototypeOfDockerode.listPodmanContainers = function (opts?: { all: boolean }): Promise<unknown> {
+    prototypeOfDockerode.listPodmanContainers = function (opts?: { all: boolean }): Promise<PodmanContainerInfo[]> {
       const optsf = {
         path: '/v4.2.0/libpod/containers/json?',
         method: 'GET',
@@ -410,7 +432,7 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<PodmanContainerInfo[]>(data));
         });
       });
     };
@@ -418,7 +440,7 @@ export class LibpodDockerode {
     // add createPodmanContainer
     prototypeOfDockerode.createPodmanContainer = function (
       containerCreateOptions: ContainerCreateOptions,
-    ): Promise<unknown> {
+    ): Promise<{ Id: string; Warnings: string[] }> {
       const optsf = {
         path: '/v4.2.0/libpod/containers/create',
         method: 'POST',
@@ -438,13 +460,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<{ Id: string; Warnings: string[] }>(data));
         });
       });
     };
 
     // add listImages
-    prototypeOfDockerode.podmanListImages = function (options?: PodmanListImagesOptions): Promise<unknown> {
+    prototypeOfDockerode.podmanListImages = function (options?: PodmanListImagesOptions): Promise<ImageInfo[]> {
       const optsf = {
         path: '/v4.2.0/libpod/images/json',
         method: 'GET',
@@ -459,13 +481,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<ImageInfo[]>(data));
         });
       });
     };
 
     // add listPods
-    prototypeOfDockerode.listPods = function (): Promise<unknown> {
+    prototypeOfDockerode.listPods = function (): Promise<PodInfo[]> {
       const optsf = {
         path: '/v4.2.0/libpod/pods/json',
         method: 'GET',
@@ -481,13 +503,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<PodInfo[]>(data));
         });
       });
     };
 
     // add attach
-    prototypeOfDockerode.podmanAttach = function (containerId: string): Promise<unknown> {
+    prototypeOfDockerode.podmanAttach = function (containerId: string): Promise<NodeJS.ReadWriteStream> {
       const optsf = {
         path: `/v4.2.0/libpod/containers/${containerId}/attach?stdin=true&stdout=true&stderr=true&`,
         method: 'POST',
@@ -506,17 +528,15 @@ export class LibpodDockerode {
       // but podman REST API will then echo the response, so send empty data '' instead
       const originalBuildRequest = this.modem.buildRequest;
       this.modem.buildRequest = function (
-        options: unknown,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        context: any,
-        data: unknown,
-        callback: unknown,
-      ): Promise<unknown> {
+        options: RequestOptions,
+        context: DialOptions,
+        data?: string | Buffer | NodeJS.ReadableStream,
+        callback?: DockerModem.RequestCallback,
+      ): void {
         if (context.allowEmpty && context.path.includes('/attach?')) {
           data = '';
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return originalBuildRequest.call(this, options, context, data, callback);
+        originalBuildRequest.call(this, options, context, data, callback);
       };
 
       return new Promise((resolve, reject) => {
@@ -524,13 +544,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(stream);
+          resolve(wrapAs<NodeJS.ReadWriteStream>(stream));
         });
       });
     };
 
     // add pruneAllImages
-    prototypeOfDockerode.pruneAllImages = function (all: boolean): Promise<unknown> {
+    prototypeOfDockerode.pruneAllImages = function (all: boolean): Promise<void> {
       const optsf = {
         path: '/v4.2.0/libpod/images/prune',
         method: 'POST',
@@ -551,38 +571,42 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // replace createVolume call by not wrapping the result into an object named Volume
     // we need the raw data
-    prototypeOfDockerode.createVolume = function (opts: VolumeCreateOptions): Promise<VolumeCreateResponse> {
-      const optsf = {
+    prototypeOfDockerode.createVolume = function (opts: unknown): Promise<VolumeCreateResponse> {
+      const optsf: DialOptions = {
         path: '/volumes/create?',
         method: 'POST',
         allowEmpty: true,
-        options: opts,
-        abortSignal: opts.abortSignal,
         statusCodes: {
           200: true, // unofficial, but proxies may return it
           201: true,
           500: 'server error',
         },
       };
+      if (opts && typeof opts === 'object') {
+        optsf.options = opts as VolumeCreateOptions;
+        if ('abortSignal' in opts) {
+          optsf.abortSignal = opts.abortSignal as AbortSignal;
+        }
+      }
       return new Promise((resolve, reject) => {
         this.modem.dial(optsf, (err: unknown, data: unknown) => {
           if (err) {
             return reject(err);
           }
-          resolve(data as VolumeCreateResponse);
+          resolve(wrapAs<VolumeCreateResponse>(data));
         });
       });
     };
 
     // add createPod
-    prototypeOfDockerode.createPod = function (podOptions: PodCreateOptions): Promise<unknown> {
+    prototypeOfDockerode.createPod = function (podOptions: PodCreateOptions): Promise<{ Id: string }> {
       const optsf = {
         path: '/v4.2.0/libpod/pods/create',
         method: 'POST',
@@ -601,13 +625,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<{ Id: string }>(data));
         });
       });
     };
 
     // add getPodInspect
-    prototypeOfDockerode.getPodInspect = function (podId: string): Promise<unknown> {
+    prototypeOfDockerode.getPodInspect = function (podId: string): Promise<PodInspectInfo> {
       const optsf = {
         path: `/v4.2.0/libpod/pods/${podId}/json`,
         method: 'GET',
@@ -625,13 +649,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<PodInspectInfo>(data));
         });
       });
     };
 
     // add startPod
-    prototypeOfDockerode.startPod = function (podId: string): Promise<unknown> {
+    prototypeOfDockerode.startPod = function (podId: string): Promise<void> {
       const optsf = {
         path: `/v4.2.0/libpod/pods/${podId}/start?`,
         method: 'POST',
@@ -647,23 +671,32 @@ export class LibpodDockerode {
       };
 
       return new Promise((resolve, reject) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.modem.dial(optsf, (err: any, data: unknown) => {
+        this.modem.dial(optsf, (err: unknown, data: unknown) => {
           if (err) {
             // check that err.json is a JSON
-            if (err?.statusCode === 409 && err?.json?.Errs) {
+            if (
+              typeof err === 'object' &&
+              'statusCode' in err &&
+              err.statusCode === 409 &&
+              'json' in err &&
+              err.json &&
+              typeof err.json === 'object' &&
+              'Errs' in err.json &&
+              err.json.Errs &&
+              Array.isArray(err.json.Errs)
+            ) {
               return reject(err.json.Errs.join(' '));
             }
 
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add stopPod
-    prototypeOfDockerode.stopPod = function (podId: string): Promise<unknown> {
+    prototypeOfDockerode.stopPod = function (podId: string): Promise<void> {
       const optsf = {
         path: `/v4.2.0/libpod/pods/${podId}/stop?`,
         method: 'POST',
@@ -682,13 +715,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add restartPod
-    prototypeOfDockerode.restartPod = function (podId: string): Promise<unknown> {
+    prototypeOfDockerode.restartPod = function (podId: string): Promise<void> {
       const optsf = {
         path: `/v4.2.0/libpod/pods/${podId}/restart?`,
         method: 'POST',
@@ -707,13 +740,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add removePod
-    prototypeOfDockerode.removePod = function (podId: string, options?: { force: boolean }): Promise<unknown> {
+    prototypeOfDockerode.removePod = function (podId: string, options?: { force: boolean }): Promise<void> {
       const optsf = {
         path: `/v4.2.0/libpod/pods/${podId}?`,
         method: 'DELETE',
@@ -732,13 +765,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add prunePods
-    prototypeOfDockerode.prunePods = function (): Promise<unknown> {
+    prototypeOfDockerode.prunePods = function (): Promise<void> {
       const optsf = {
         path: '/v4.2.0/libpod/pods/prune',
         method: 'POST',
@@ -753,13 +786,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add generateKube
-    prototypeOfDockerode.generateKube = function (names: string[]): Promise<unknown> {
+    prototypeOfDockerode.generateKube = function (names: string[]): Promise<string> {
       // transform array into a list of queries
       const queries = names
         .map(name => {
@@ -785,18 +818,21 @@ export class LibpodDockerode {
           if (Buffer.isBuffer(data)) {
             resolve((data as Buffer).toString());
           } else {
-            resolve(data);
+            resolve(wrapAs<string>(data));
           }
         });
       });
     };
 
     // add playKube
-    prototypeOfDockerode.playKube = function (yamlContentFilePath: string): Promise<unknown> {
+    prototypeOfDockerode.playKube = function (
+      file: string | NodeJS.ReadableStream,
+      options?: { build?: boolean },
+    ): Promise<PlayKubeInfo> {
       const optsf = {
         path: '/v4.2.0/libpod/play/kube',
         method: 'POST',
-        file: yamlContentFilePath,
+        file: file,
         statusCodes: {
           200: true,
           204: true,
@@ -805,24 +841,27 @@ export class LibpodDockerode {
         options: {},
       };
 
+      // if we don't build - we should send Content-Type application/yaml
+      // application/tar is not supported
+      const contentType = options?.build ? 'application/x-tar' : 'application/yaml';
+
       // patch the modem to not send x-tar header as content-type
       const originalBuildRequest = this.modem.buildRequest;
       this.modem.buildRequest = function (
-        options: unknown,
-        context: unknown,
-        data: unknown,
-        callback: unknown,
-      ): Promise<unknown> {
+        options: RequestOptions,
+        context: DialOptions,
+        data?: string | Buffer | NodeJS.ReadableStream,
+        callback?: DockerModem.RequestCallback,
+      ): void {
         // in case of kube play, docker-modem will send the header application/tar while it's basically the content of the file so it should be application/yaml
         if (context && typeof context === 'object' && 'path' in context) {
           if (String(context.path).includes('/libpod/play/kube')) {
             if (options && typeof options === 'object' && 'headers' in options) {
-              options.headers = { 'Content-Type': 'application/yaml' };
+              options.headers = { 'Content-Type': contentType };
             }
           }
         }
-
-        return originalBuildRequest.call(this, options, context, data, callback);
+        originalBuildRequest.call(this, options, context, data, callback);
       };
 
       return new Promise((resolve, reject) => {
@@ -830,13 +869,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<PlayKubeInfo>(data));
         });
       });
     };
 
     // info
-    prototypeOfDockerode.podmanInfo = function (): Promise<unknown> {
+    prototypeOfDockerode.podmanInfo = function (): Promise<Info> {
       const optsf = {
         path: '/v4.2.0/libpod/info',
         method: 'GET',
@@ -852,7 +891,7 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<Info>(data));
         });
       });
     };
@@ -876,11 +915,11 @@ export class LibpodDockerode {
         },
       };
       return new Promise((resolve, reject) => {
-        this.modem.dial(optsf, (err: unknown, data: NodeJS.ReadableStream) => {
+        this.modem.dial(optsf, (err: unknown, data: unknown) => {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<NodeJS.ReadableStream>(data));
         });
       });
     };
@@ -889,7 +928,7 @@ export class LibpodDockerode {
     prototypeOfDockerode.podmanPushManifest = function (
       manifestOptions: ManifestPushOptions,
       authInfo?: Dockerode.AuthConfig,
-    ): Promise<unknown> {
+    ): Promise<void> {
       const encodedManifestName = encodeURIComponent(manifestOptions.name);
       const encodedDestinationName = encodeURIComponent(manifestOptions.destination);
 
@@ -923,13 +962,15 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
     // add createManifest
-    prototypeOfDockerode.podmanCreateManifest = function (manifestOptions: ManifestCreateOptions): Promise<unknown> {
+    prototypeOfDockerode.podmanCreateManifest = function (
+      manifestOptions: ManifestCreateOptions,
+    ): Promise<{ engineId: string; Id: string }> {
       // make sure encodeURI component for the name ex. domain.com/foo/bar:latest
       const encodedManifestName = encodeURIComponent(manifestOptions.name);
 
@@ -950,13 +991,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<{ engineId: string; Id: string }>(data));
         });
       });
     };
 
     // add inspectManifest
-    prototypeOfDockerode.podmanInspectManifest = function (manifestName: string): Promise<unknown> {
+    prototypeOfDockerode.podmanInspectManifest = function (manifestName: string): Promise<ManifestInspectInfo> {
       // make sure encodeURI component for the name ex. domain.com/foo/bar:latest
       const encodedManifestName = encodeURIComponent(manifestName);
 
@@ -978,13 +1019,13 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<ManifestInspectInfo>(data));
         });
       });
     };
 
     // remove manifest
-    prototypeOfDockerode.podmanRemoveManifest = function (manifestName: string): Promise<unknown> {
+    prototypeOfDockerode.podmanRemoveManifest = function (manifestName: string): Promise<void> {
       // make sure encodeURI component for the name ex. domain.com/foo/bar:latest
       const encodedManifestName = encodeURIComponent(manifestName);
 
@@ -1004,12 +1045,14 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<void>(data));
         });
       });
     };
 
-    prototypeOfDockerode.resolveShortnameImage = function (shortname: string): Promise<unknown> {
+    prototypeOfDockerode.resolveShortnameImage = function (shortname: string): Promise<{
+      Names: string[];
+    }> {
       const optsf = {
         path: `/v5.0.0/libpod/images/${shortname}/resolve`,
         method: 'GET',
@@ -1025,7 +1068,7 @@ export class LibpodDockerode {
           if (err) {
             return reject(err);
           }
-          resolve(data);
+          resolve(wrapAs<{ Names: string[] }>(data));
         });
       });
     };

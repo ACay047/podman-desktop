@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2023 Red Hat, Inc.
+ * Copyright (C) 2023-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ import type { Certificates } from '/@/plugin/certificates.js';
 import type { InternalContainerProvider } from '/@/plugin/container-registry.js';
 import { ContainerProviderRegistry } from '/@/plugin/container-registry.js';
 import { ImageRegistry } from '/@/plugin/image-registry.js';
+import { KubePlayContext } from '/@/plugin/podman/kube.js';
 import type { Proxy } from '/@/plugin/proxy.js';
 import type { Telemetry } from '/@/plugin/telemetry/telemetry.js';
 import type { ContainerCreateOptions } from '/@api/container-info.js';
@@ -53,11 +54,10 @@ import type { EnvfileParser } from './env-file-parser.js';
 import type { ProviderRegistry } from './provider-registry.js';
 
 /* eslint-disable @typescript-eslint/no-empty-function */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable no-null/no-null */
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 
-const tar: { pack: (dir: string, opts?: PackOptions & { fs?: any }) => NodeJS.ReadableStream } = require('tar-fs');
+const tar: { pack: (dir: string, opts?: PackOptions & { fs?: unknown }) => NodeJS.ReadableStream } = require('tar-fs');
 
 const originalTarPack = tar.pack;
 
@@ -381,6 +381,15 @@ class TestContainerProviderRegistry extends ContainerProviderRegistry {
   }
 }
 
+class DockerodeTestStatusError extends Error {
+  constructor(
+    message: string,
+    public statusCode?: number,
+  ) {
+    super(message);
+  }
+}
+
 let containerRegistry: TestContainerProviderRegistry;
 
 const telemetryTrackMock = vi.fn().mockResolvedValue({});
@@ -415,10 +424,12 @@ vi.mock('node:fs', async () => {
 vi.mock('node:stream/promises', async () => {
   return {
     pipeline: vi.fn(),
+    readFile: vi.fn(),
   };
 });
 
 vi.mock('node:fs/promises');
+vi.mock('/@/plugin/podman/kube.js');
 
 beforeEach(() => {
   vi.mocked(apiSender.receive).mockClear();
@@ -702,11 +713,11 @@ describe('execInContainer', () => {
   });
 
   test('test exec in a container with interval inspect', async () => {
-    const startStream = new EventEmitter();
+    const startStream: EventEmitter & { destroy?: () => void } = new EventEmitter();
 
     // add a destroy method
     const destroyMock = vi.fn();
-    (startStream as any).destroy = destroyMock;
+    startStream.destroy = destroyMock;
 
     const startExecMock = vi.fn();
     startExecMock.mockResolvedValue(startStream);
@@ -1208,8 +1219,7 @@ test('pull unknown image fails with error 403', async () => {
   const containerConnectionInfo = {} as ProviderContainerConnectionInfo;
 
   // add statusCode on the error
-  const error = new Error('access denied');
-  (error as any).statusCode = 403;
+  const error = new DockerodeTestStatusError('access denied', 403);
 
   pullMock.mockRejectedValue(error);
 
@@ -1297,8 +1307,7 @@ test('pull unknown image fails with error 401', async () => {
   const containerConnectionInfo = {} as ProviderContainerConnectionInfo;
 
   // add statusCode on the error
-  const error = new Error('access denied');
-  (error as any).statusCode = 401;
+  const error = new DockerodeTestStatusError('access denied', 401);
 
   pullMock.mockRejectedValue(error);
 
@@ -1326,8 +1335,7 @@ test('pull unknown image fails with error 500', async () => {
   const containerConnectionInfo = {} as ProviderContainerConnectionInfo;
 
   // add statusCode on the error
-  const error = new Error('access denied');
-  (error as any).statusCode = 500;
+  const error = new DockerodeTestStatusError('access denied', 500);
 
   pullMock.mockRejectedValue(error);
 
@@ -1644,14 +1652,14 @@ describe('buildImage', () => {
     vi.mocked(fs.existsSync).mockImplementation(path => {
       return String(path).endsWith('Containerfile.0') || String(path).endsWith('Containerfile.1');
     });
-    vi.mocked(dockerAPI.buildImage).mockReset();
+    vi.mocked(dockerAPI.buildImage).mockClear();
 
     // Mock tar.pack to call the original one with the additional parameter `fs`,
     // virtualizing an fs with empty directories
     let mapOpts: (header: Headers) => Headers = header => header;
 
     vi.spyOn(tar, 'pack').mockImplementation(
-      (dir: string, opts?: PackOptions & { fs?: any }): NodeJS.ReadableStream => {
+      (dir: string, opts?: PackOptions & { fs?: unknown }): NodeJS.ReadableStream => {
         const virtfs = {
           // all paths exist and are directories
           lstat: vi.fn().mockImplementation((_path, callback) => {
@@ -1748,14 +1756,14 @@ describe('buildImage', () => {
     vi.mocked(fs.existsSync).mockImplementation(path => {
       return String(path).endsWith('Containerfile.0') || String(path).endsWith('Containerfile.1');
     });
-    vi.mocked(dockerAPI.buildImage).mockReset();
+    vi.mocked(dockerAPI.buildImage).mockClear();
 
     // Mock tar.pack to call the original one with the additional parameter `fs`,
     // virtualizing an fs with empty directories
     let mapOpts: (header: Headers) => Headers = header => header;
 
     vi.spyOn(tar, 'pack').mockImplementation(
-      (dir: string, opts?: PackOptions & { fs?: any }): NodeJS.ReadableStream => {
+      (dir: string, opts?: PackOptions & { fs?: unknown }): NodeJS.ReadableStream => {
         const virtfs = {
           // all paths exist and are directories
           lstat: vi.fn().mockImplementation((_path, callback) => {
@@ -3472,8 +3480,7 @@ test('setupConnectionAPI with errors', async () => {
 
   // filter calls to find the one with container-started-event
   const containerStartedEventCalls = allCalls.filter(call => call[0] === 'container-started-event');
-  expect(containerStartedEventCalls).toHaveLength(1);
-  expect(containerStartedEventCalls[0]?.[1]).toBe(fakeId);
+  expect(containerStartedEventCalls).toHaveLength(0);
 
   stream2.end();
 
@@ -3536,9 +3543,9 @@ test('setupConnectionAPI with errors after machine being removed', async () => {
 test('check handleEvents with loadArchive', async () => {
   const consoleLogSpy = vi.spyOn(console, 'log');
   const getEventsMock = vi.fn();
-  let eventsMockCallback: any;
+  let eventsMockCallback: ((ignored: unknown, stream: PassThrough) => void) | undefined;
   // keep the function passed in parameter of getEventsMock
-  getEventsMock.mockImplementation((options: any) => {
+  getEventsMock.mockImplementation((options: (ignored: unknown, stream: PassThrough) => void) => {
     eventsMockCallback = options;
   });
 
@@ -3574,10 +3581,11 @@ test('check handleEvents with loadArchive', async () => {
 
 test('check handleEvents is not calling the console.log for health_status event', async () => {
   const consoleLogSpy = vi.spyOn(console, 'log');
+  consoleLogSpy.mockClear();
   const getEventsMock = vi.fn();
-  let eventsMockCallback: any;
+  let eventsMockCallback: ((ignored: unknown, stream: PassThrough) => void) | undefined;
   // keep the function passed in parameter of getEventsMock
-  getEventsMock.mockImplementation((options: any) => {
+  getEventsMock.mockImplementation((options: (ignored: unknown, stream: PassThrough) => void) => {
     eventsMockCallback = options;
   });
 
@@ -5025,6 +5033,7 @@ describe('saveImages', () => {
       },
       api,
     } as unknown as InternalContainerProvider);
+    pipelineMock.mockClear();
     await containerRegistry.saveImages({
       outputTarget: 'path',
       images: [
@@ -5474,6 +5483,7 @@ test('saveImage succeeds', async () => {
     },
     api,
   } as unknown as InternalContainerProvider);
+  pipelineMock.mockClear();
   await containerRegistry.saveImage('podman1', 'an-image', '/path/to/file');
 
   expect(pipelineMock).toHaveBeenCalledOnce();
@@ -5482,7 +5492,7 @@ test('saveImage succeeds', async () => {
 test('saveImage succeeds when a passing a cancellable token never canceled', async () => {
   const cancellationTokenRegistry = new CancellationTokenRegistry();
   const cancellableTokenId = cancellationTokenRegistry.createCancellationTokenSource();
-  const token = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId)!.token;
+  const token = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId)?.token;
   const dockerode = new Dockerode({ protocol: 'http', host: 'localhost' });
   const stream: Dockerode.Image = {
     get: vi.fn(),
@@ -5507,6 +5517,7 @@ test('saveImage succeeds when a passing a cancellable token never canceled', asy
     },
     api,
   } as unknown as InternalContainerProvider);
+  pipelineMock.mockClear();
   await containerRegistry.saveImage('podman1', 'an-image', '/path/to/file', token);
 
   expect(pipelineMock).toHaveBeenCalledOnce();
@@ -5523,8 +5534,8 @@ describe('using fake timers', () => {
   test('saveImage canceled during image download', async () => {
     const cancellationTokenRegistry = new CancellationTokenRegistry();
     const cancellableTokenId = cancellationTokenRegistry.createCancellationTokenSource();
-    const tokenSource = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId)!;
-    const token = tokenSource.token;
+    const tokenSource = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId);
+    const token = tokenSource?.token;
     const dockerode = new Dockerode({ protocol: 'http', host: 'localhost' });
     const imageObjectGetMock = vi.fn().mockImplementation(() => {
       return new Promise(resolve => {
@@ -5551,7 +5562,7 @@ describe('using fake timers', () => {
       api,
     } as unknown as InternalContainerProvider);
     setTimeout(() => {
-      tokenSource.cancel();
+      tokenSource?.cancel();
     }, 500);
 
     const savePromise = containerRegistry.saveImage('podman1', 'an-image', '/path/to/file', token);
@@ -5568,8 +5579,8 @@ test('saveImage canceled during image saving on filesystem', async () => {
   vi.mocked(fs.createWriteStream).mockImplementation(fsModule.createWriteStream);
   const cancellationTokenRegistry = new CancellationTokenRegistry();
   const cancellableTokenId = cancellationTokenRegistry.createCancellationTokenSource();
-  const tokenSource = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId)!;
-  const token = tokenSource.token;
+  const tokenSource = cancellationTokenRegistry.getCancellationTokenSource(cancellableTokenId);
+  const token = tokenSource?.token;
   const dockerode = new Dockerode({ protocol: 'http', host: 'localhost' });
   const imageObjectGetMock = vi.fn().mockResolvedValue(() => {
     const stream = Readable.from(Buffer.from('a content'));
@@ -5599,7 +5610,7 @@ test('saveImage canceled during image saving on filesystem', async () => {
     api,
   } as unknown as InternalContainerProvider);
   setTimeout(() => {
-    tokenSource.cancel();
+    tokenSource?.cancel();
   }, 50);
 
   const tmpdir = os.tmpdir();
@@ -5939,5 +5950,88 @@ describe('prune images', () => {
 
     // check we called the api
     expect(dockerProvider.api?.pruneImages).toBeCalledWith({ filters: { dangling: { false: false } } });
+  });
+});
+
+describe('kube play', () => {
+  const PODMAN_PROVIDER: InternalContainerProvider & { api: Dockerode; libpodApi: LibPod } = {
+    name: 'podman',
+    id: 'podman1',
+    api: {
+      version: vi.fn(),
+    } as unknown as Dockerode,
+    libpodApi: {
+      playKube: vi.fn(),
+    } as unknown as LibPod,
+    connection: {
+      type: 'podman',
+      name: 'podman',
+      displayName: 'podman',
+      endpoint: {
+        socketPath: '/endpoint1.sock',
+      },
+      status: vi.fn(),
+    },
+  };
+
+  const PODMAN_523_VERSION: Dockerode.DockerVersion = {
+    Version: '5.2.3',
+    ApiVersion: '1.41',
+  } as unknown as Dockerode.DockerVersion;
+
+  const PODMAN_531_VERSION: Dockerode.DockerVersion = {
+    Version: '5.3.1',
+    ApiVersion: '1.41',
+  } as unknown as Dockerode.DockerVersion;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  test('non-supported version should throw an error', async () => {
+    vi.mocked(PODMAN_PROVIDER.api.version).mockResolvedValue(PODMAN_523_VERSION);
+
+    // set provider
+    containerRegistry.addInternalProvider('podman.podman', PODMAN_PROVIDER);
+
+    await expect(async () => {
+      await containerRegistry.playKube(
+        'dummy-file',
+        {
+          name: PODMAN_PROVIDER.name,
+          endpoint: PODMAN_PROVIDER.connection.endpoint,
+        } as unknown as ProviderContainerConnectionInfo,
+        {
+          build: true,
+        },
+      );
+    }).rejects.toThrowError('kube play build is not supported on podman: Podman 5.3.0 and above supports this feature');
+  });
+
+  test('build option false should use playKube with YAML file', async () => {
+    // set provider
+    containerRegistry.addInternalProvider('podman.podman', PODMAN_PROVIDER);
+
+    await containerRegistry.playKube('dummy-file', {
+      name: PODMAN_PROVIDER.name,
+      endpoint: PODMAN_PROVIDER.connection.endpoint,
+    } as unknown as ProviderContainerConnectionInfo);
+
+    expect(PODMAN_PROVIDER.libpodApi.playKube).toHaveBeenCalledWith('dummy-file');
+  });
+
+  test('KubePlayContext returning zero build contexts should play kube with file', async () => {
+    vi.mocked(PODMAN_PROVIDER.api.version).mockResolvedValue(PODMAN_531_VERSION);
+    vi.mocked(KubePlayContext.prototype.getBuildContexts).mockReturnValue([]); // mock no contexts
+
+    // set provider
+    containerRegistry.addInternalProvider('podman.podman', PODMAN_PROVIDER);
+
+    await containerRegistry.playKube('dummy-file', {
+      name: PODMAN_PROVIDER.name,
+      endpoint: PODMAN_PROVIDER.connection.endpoint,
+    } as unknown as ProviderContainerConnectionInfo);
+
+    expect(PODMAN_PROVIDER.libpodApi.playKube).toHaveBeenCalledWith('dummy-file');
   });
 });

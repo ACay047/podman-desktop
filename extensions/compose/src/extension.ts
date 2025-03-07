@@ -123,12 +123,11 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
     async () => {
       // If the version is undefined (checks weren't run, or the user didn't select a version)
       // we will just download the latest version
-      if (composeVersionMetadata === undefined) {
-        composeVersionMetadata = await composeDownload.getLatestVersionAsset();
-      }
-
       let downloaded: boolean = false;
       try {
+        if (composeVersionMetadata === undefined) {
+          composeVersionMetadata = await composeDownload.getLatestVersionAsset();
+        }
         // Download
         await composeDownload.download(composeVersionMetadata);
 
@@ -140,9 +139,11 @@ export async function activate(extensionContext: extensionApi.ExtensionContext):
         if (!composeCliTool) {
           await registerCLITool(composeDownload, detect, extensionContext);
         }
+      } catch (error) {
+        await extensionApi.window.showErrorMessage(`Unable to download docker-compose binary: ${error}`);
       } finally {
         // Make sure we log the telemetry even if we encounter an error
-        // If we have downloaded the binary, we can log it as being succcessfully downloaded
+        // If we have downloaded the binary, we can log it as being successfully downloaded
         telemetryLogger?.logUsage('compose.onboarding.downloadCommand', {
           successful: downloaded,
           version: composeVersionMetadata?.tag,
@@ -416,7 +417,7 @@ async function registerCLITool(
 
       // delete the executable in the system path
       const systemPath = getSystemBinaryPath(composeCliName);
-      await deleteFile(systemPath);
+      await deleteExecutableAsAdmin(systemPath);
 
       // update the version to undefined
       binaryVersion = undefined;
@@ -453,17 +454,42 @@ async function deleteFile(filePath: string): Promise<void> {
 }
 
 async function deleteFileAsAdmin(filePath: string): Promise<void> {
-  const system = process.platform;
-
   const args: string[] = [filePath];
-  const command = system === 'win32' ? 'del' : 'rm';
+  const command = extensionApi.env.isWindows ? 'del' : 'rm';
 
   try {
-    // Use admin prileges
+    // Use admin privileges
     await extensionApi.process.exec(command, args, { isAdmin: true });
   } catch (error) {
     console.error(`Failed to uninstall '${filePath}': ${error}`);
     throw error;
+  }
+}
+
+async function deleteExecutableAsAdmin(filePath: string): Promise<void> {
+  const command = extensionApi.env.isWindows ? 'del' : 'rm';
+  const checkCommand = extensionApi.env.isWindows ? 'where.exe' : 'which';
+  let fileExistsPath = '';
+
+  try {
+    const { stdout: fullPath } = await extensionApi.process.exec(checkCommand, [filePath]);
+    fileExistsPath = fullPath;
+  } catch (err) {
+    if (err && typeof err === 'object' && 'stderr' in err) {
+      console.log(err.stderr);
+    } else {
+      console.warn(`Error checking Compose ${filePath} path`, err);
+    }
+  }
+
+  if (fileExistsPath) {
+    try {
+      // Use admin privileges
+      await extensionApi.process.exec(command, [filePath], { isAdmin: true });
+    } catch (error) {
+      console.error(`Failed to uninstall '${filePath}': ${error}`);
+      throw error;
+    }
   }
 }
 

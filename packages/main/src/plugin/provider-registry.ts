@@ -399,8 +399,20 @@ export class ProviderRegistry {
     // grab the provider
     const provider = this.getMatchingProvider(internalId);
 
-    await autoStart.start(new LoggerImpl());
-
+    const context = Object.freeze({
+      updateContainerConnection: (containerProviderConnection: ContainerProviderConnection): void => {
+        if (!this.isContainerProviderConnectionRegistered(provider, containerProviderConnection)) {
+          throw new Error(
+            `container connection ${containerProviderConnection.name} is not registered by provider ${provider.name}`,
+          );
+        }
+        const providerConnectionInfo = this.getProviderConnectionInfo(containerProviderConnection);
+        if (this.isProviderContainerConnection(providerConnectionInfo)) {
+          this.fireUpdateContainerConnectionEvents(provider.id, providerConnectionInfo);
+        }
+      },
+    });
+    await autoStart.start(new LoggerImpl(), context);
     // send the event
     this._onDidUpdateProvider.fire({
       id: provider.id,
@@ -1006,22 +1018,7 @@ export class ProviderRegistry {
       await lifecycle.start(context, logHandler);
     } finally {
       if (this.isProviderContainerConnection(providerConnectionInfo)) {
-        const event = {
-          providerId: provider.id,
-          connection: {
-            displayName: providerConnectionInfo.displayName,
-            name: providerConnectionInfo.name,
-            type: providerConnectionInfo.type,
-            endpoint: providerConnectionInfo.endpoint,
-            status: (): ProviderConnectionStatus => {
-              return 'started';
-            },
-          },
-          status: 'started' as ProviderConnectionStatus,
-        };
-        this._onBeforeDidUpdateContainerConnection.fire(event);
-        this._onDidUpdateContainerConnection.fire(event);
-        this._onAfterDidUpdateContainerConnection.fire(event);
+        this.fireUpdateContainerConnectionEvents(provider.id, providerConnectionInfo);
       } else {
         this._onDidUpdateKubernetesConnection.fire({
           providerId: provider.id,
@@ -1036,6 +1033,20 @@ export class ProviderRegistry {
         });
       }
     }
+  }
+
+  // call callback after api is attached to the connection
+  public onProviderConnectionApiAttached(providerId: string, callback: () => void): void {
+    if (this.containerRegistry.isApiAttached(providerId)) {
+      callback();
+      return;
+    }
+    const disposable = this.containerRegistry.onApiAttached((id: string) => {
+      if (id === providerId) {
+        callback();
+        disposable.dispose();
+      }
+    });
   }
 
   async editProviderConnection(
@@ -1332,5 +1343,44 @@ export class ProviderRegistry {
       return this.toProviderInfo(provider);
     }
     return undefined;
+  }
+
+  protected fireUpdateContainerConnectionEvents(
+    providerId: string,
+    providerConnectionInfo: ProviderContainerConnectionInfo,
+  ): void {
+    const sendEvents = (status: ProviderConnectionStatus): void => {
+      const event = {
+        providerId: providerId,
+        connection: {
+          displayName: providerConnectionInfo.displayName,
+          name: providerConnectionInfo.name,
+          type: providerConnectionInfo.type,
+          endpoint: providerConnectionInfo.endpoint,
+          status: (): ProviderConnectionStatus => {
+            return status;
+          },
+        },
+        status: status as ProviderConnectionStatus,
+      };
+      this._onBeforeDidUpdateContainerConnection.fire(event);
+      this._onDidUpdateContainerConnection.fire(event);
+      this._onAfterDidUpdateContainerConnection.fire(event);
+    };
+    sendEvents('starting');
+    this.onProviderConnectionApiAttached(`${providerId}.${providerConnectionInfo.name}`, () => sendEvents('started'));
+  }
+
+  isContainerProviderConnectionRegistered(
+    provider: ProviderImpl,
+    containerProviderConnection: ContainerProviderConnection,
+  ): boolean {
+    const connections = provider.containerConnections;
+    for (const connection of connections) {
+      if (connection.name === containerProviderConnection.name) {
+        return true;
+      }
+    }
+    return false;
   }
 }

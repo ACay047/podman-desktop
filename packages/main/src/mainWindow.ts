@@ -57,7 +57,7 @@ async function createWindow(): Promise<BrowserWindow> {
     height: INITIAL_APP_HEIGHT,
     backgroundColor: INITIAL_APP_BACKGROUND_COLOR,
     webPreferences: {
-      webSecurity: false,
+      webSecurity: true,
       //nativeWindowOpen: true,
       webviewTag: true, // The webview tag is not recommended. Consider alternatives like iframe or Electron's BrowserView. https://www.electronjs.org/docs/latest/api/webview-tag#warning
       preload: join(__dirname, '../../preload/dist/index.cjs'),
@@ -148,7 +148,6 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // receive the message because an update is in progress and we need to quit the app
   let quitAfterUpdate = false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   autoUpdater.on('before-quit-for-update', () => {
     quitAfterUpdate = true;
   });

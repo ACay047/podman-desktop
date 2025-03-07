@@ -58,9 +58,7 @@ export async function deleteContainer(page: Page, name: string): Promise<void> {
       try {
         console.log('Waiting for container to get deleted ...');
         await playExpect
-          .poll(async () => await containers.getContainerRowByName(name), {
-            timeout: 30_000,
-          })
+          .poll(async () => await containers.getContainerRowByName(name), { timeout: 30_000 })
           .toBeFalsy();
       } catch (error) {
         if (!(error as Error).message.includes('Page is empty')) {
@@ -118,15 +116,11 @@ export async function deleteRegistry(page: Page, name: string, failIfNotExist = 
     const settingsBar = await navigationBar.openSettings();
     const registryPage = await settingsBar.openTabPage(RegistriesPage);
     const registryRecord = await registryPage.getRegistryRowByName(name);
-    await waitUntil(() => registryRecord.isVisible(), {
-      sendError: failIfNotExist,
-    });
+    await waitUntil(() => registryRecord.isVisible(), { sendError: failIfNotExist });
     if (await registryRecord.isVisible()) {
       // it might be that the record exist but there are no credentials -> it is default registry and it is empty
       // or if there is a kebab memu available
-      const dropdownMenu = registryRecord.getByRole('button', {
-        name: 'kebab menu',
-      });
+      const dropdownMenu = registryRecord.getByRole('button', { name: 'kebab menu' });
       if (await dropdownMenu.isVisible()) {
         await registryPage.removeRegistry(name);
       }
@@ -174,16 +168,26 @@ export async function handleConfirmationDialog(
   confirm = true,
   confirmationButton = 'Yes',
   cancelButton = 'Cancel',
+  timeout = 10_000,
+  moreThanOneConsecutiveDialogs = false,
 ): Promise<void> {
   return test.step('Handle confirmation dialog', async () => {
     // wait for dialog to appear using waitFor
     const dialog = page.getByRole('dialog', { name: dialogTitle, exact: true });
-    await waitUntil(async () => await dialog.isVisible());
+    await waitUntil(async () => await dialog.isVisible(), { timeout: timeout });
     const button = confirm
       ? dialog.getByRole('button', { name: confirmationButton })
       : dialog.getByRole('button', { name: cancelButton });
     await playExpect(button).toBeEnabled();
     await button.click();
+
+    if (moreThanOneConsecutiveDialogs) {
+      const button = dialog.getByRole('button', { name: 'Done' });
+      await playExpect(button).toBeEnabled({ timeout: timeout });
+      await button.click();
+    }
+
+    await waitUntil(async () => !(await dialog.isVisible()), { timeout: timeout });
   });
 }
 
@@ -204,9 +208,7 @@ export async function deletePodmanMachine(page: Page, machineVisibleName: string
       .poll(async () => await resourcesPage.resourceCardIsVisible(RESOURCE_NAME), { timeout: 10_000 })
       .toBeTruthy();
     const podmanResourceCard = new ResourceConnectionCardPage(page, RESOURCE_NAME, machineVisibleName);
-    await playExpect(podmanResourceCard.providerConnections).toBeVisible({
-      timeout: 10_000,
-    });
+    await playExpect(podmanResourceCard.providerConnections).toBeVisible({ timeout: 10_000 });
     await waitUntil(
       async () => {
         return await podmanResourceCard.resourceElement.isVisible();
@@ -243,9 +245,7 @@ export async function deletePodmanMachine(page: Page, machineVisibleName: string
         });
       }
       await podmanResourceCard.performConnectionAction(ResourceElementActions.Delete);
-      await playExpect(podmanResourceCard.resourceElement).toBeHidden({
-        timeout: 60_000,
-      });
+      await playExpect(podmanResourceCard.resourceElement).toBeHidden({ timeout: 60_000 });
     } else {
       console.log(`Podman machine [${machineVisibleName}] not present, skipping deletion.`);
     }
@@ -296,18 +296,14 @@ export async function ensureCliInstalled(page: Page, resourceName: string, timeo
     const cliToolsPage = new CLIToolsPage(page);
     await playExpect(cliToolsPage.toolsTable).toBeVisible({ timeout: 10_000 });
     await playExpect.poll(async () => await cliToolsPage.toolsTable.count()).toBeGreaterThan(0);
-    await playExpect(cliToolsPage.getToolRow(resourceName)).toBeVisible({
-      timeout: 10_000,
-    });
+    await playExpect(cliToolsPage.getToolRow(resourceName)).toBeVisible({ timeout: 10_000 });
 
     if (!(await cliToolsPage.getCurrentToolVersion(resourceName))) {
       await cliToolsPage.installTool(resourceName);
     }
 
     await playExpect
-      .poll(async () => await cliToolsPage.getCurrentToolVersion(resourceName), {
-        timeout: timeout,
-      })
+      .poll(async () => await cliToolsPage.getCurrentToolVersion(resourceName), { timeout: timeout })
       .toBeTruthy();
   });
 }
@@ -363,6 +359,22 @@ export async function runComposeUpFromCLI(composeFilePath: string): Promise<void
       execSync(`podman compose -f ${composeFilePath} up -d`);
     } catch (error) {
       throw new Error(`Error running podman compose up from CLI: ${error}`);
+    }
+  });
+}
+
+export async function untagImagesFromPodman(name: string, tag: string = ''): Promise<void> {
+  return test.step('Untag images from Podman', async () => {
+    try {
+      if (tag) {
+        // eslint-disable-next-line sonarjs/os-command
+        execSync(`podman untag ${name}:${tag}`);
+      } else {
+        // eslint-disable-next-line sonarjs/os-command
+        execSync(`podman untag ${name}`);
+      }
+    } catch (error) {
+      throw new Error(`Error untagging images from Podman: ${error}`);
     }
   });
 }

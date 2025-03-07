@@ -38,6 +38,7 @@ export class ImageDetailsPage extends DetailsPage {
   readonly saveImageInput: Locator;
   readonly confirmSaveImages: Locator;
   readonly browseButton: Locator;
+  readonly pushButton: Locator;
 
   constructor(page: Page, name: string) {
     super(page, name);
@@ -49,6 +50,10 @@ export class ImageDetailsPage extends DetailsPage {
     });
     this.editButton = this.controlActions.getByRole('button', {
       name: 'Edit Image',
+    });
+    this.pushButton = this.controlActions.getByRole('button', {
+      name: 'Push Image',
+      exact: true,
     });
     this.summaryTab = this.tabs.getByText('Summary');
     this.historyTab = this.tabs.getByText('History');
@@ -89,6 +94,14 @@ export class ImageDetailsPage extends DetailsPage {
     });
   }
 
+  async pushImage(): Promise<void> {
+    return test.step('Push image', async () => {
+      await playExpect(this.pushButton).toBeEnabled();
+      await this.pushButton.click();
+      await handleConfirmationDialog(this.page, 'Push image', true, 'Push image', '', 60_000, true);
+    });
+  }
+
   async saveImage(outputPath: string): Promise<ImagesPage> {
     if (!outputPath) {
       throw Error(`Path is incorrect or not provided!`);
@@ -106,5 +119,13 @@ export class ImageDetailsPage extends DetailsPage {
     await this.confirmSaveImages.click();
 
     return new ImagesPage(this.page);
+  }
+
+  async pushImageToKindCluster(): Promise<void> {
+    const pushToKindButton = this.page.getByRole('button', { name: 'Push image to Kind cluster' });
+    await playExpect(pushToKindButton).toBeVisible();
+    await pushToKindButton.click();
+
+    await handleConfirmationDialog(this.page, 'Kind', true, 'OK', '', 15_000);
   }
 }

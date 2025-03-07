@@ -20,6 +20,7 @@ import type { ContextHealth } from '/@api/kubernetes-contexts-healths.js';
 import type { ContextPermission } from '/@api/kubernetes-contexts-permissions.js';
 import type { ResourceCount } from '/@api/kubernetes-resource-count.js';
 import type { KubernetesContextResources } from '/@api/kubernetes-resources.js';
+import type { KubernetesTroubleshootingInformation } from '/@api/kubernetes-troubleshooting.js';
 
 import type { ApiSenderType } from '../api.js';
 import type { ContextHealthState } from './context-health-checker.js';
@@ -35,13 +36,17 @@ export class ContextsStatesDispatcher {
 
   init(): void {
     this.manager.onContextHealthStateChange((_state: ContextHealthState) => this.updateHealthStates());
+    this.manager.onOfflineChange(() => this.updateHealthStates());
     this.manager.onContextPermissionResult((_permissions: ContextPermissionResult) => this.updatePermissions());
     this.manager.onContextDelete((_state: DispatcherEvent) => {
       this.updateHealthStates();
       this.updatePermissions();
     });
     this.manager.onResourceCountUpdated(() => this.updateResourcesCount());
-    this.manager.onResourceUpdated(event => this.updateResource(event.resourceName));
+    this.manager.onResourceUpdated(event => {
+      this.updateResource(event.resourceName);
+      this.updateActiveResourcesCount();
+    });
   }
 
   updateHealthStates(): void {
@@ -55,6 +60,7 @@ export class ContextsStatesDispatcher {
         contextName,
         checking: health.checking,
         reachable: health.reachable,
+        offline: this.manager.isContextOffline(contextName),
       });
     }
     return value;
@@ -65,29 +71,34 @@ export class ContextsStatesDispatcher {
   }
 
   getContextsPermissions(): ContextPermission[] {
-    return Array.from(this.manager.getPermissions().entries()).flatMap(([contextName, permissions]) => {
-      return Array.from(permissions.entries()).map(([resourceName, contextResourcePermission]) => ({
-        contextName,
-        resourceName,
-        permitted: contextResourcePermission.permitted,
-        reason: contextResourcePermission.reason,
-      }));
-    });
+    return this.manager.getPermissions();
   }
 
   updateResourcesCount(): void {
     this.apiSender.send(`kubernetes-resources-count`);
   }
 
+  updateActiveResourcesCount(): void {
+    this.apiSender.send(`kubernetes-active-resources-count`);
+  }
+
   getResourcesCount(): ResourceCount[] {
     return this.manager.getResourcesCount();
+  }
+
+  getActiveResourcesCount(): ResourceCount[] {
+    return this.manager.getActiveResourcesCount();
   }
 
   updateResource(resourceName: string): void {
     this.apiSender.send(`kubernetes-update-${resourceName}`);
   }
 
-  getResources(resourceName: string): KubernetesContextResources[] {
-    return this.manager.getResources(resourceName);
+  getResources(contextNames: string[], resourceName: string): KubernetesContextResources[] {
+    return this.manager.getResources(contextNames, resourceName);
+  }
+
+  getTroubleshootingInformation(): KubernetesTroubleshootingInformation {
+    return this.manager.getTroubleshootingInformation();
   }
 }

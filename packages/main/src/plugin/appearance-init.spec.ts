@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  ***********************************************************************/
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { nativeTheme } from 'electron';
 import { beforeAll, expect, test, vi } from 'vitest';
@@ -116,7 +114,6 @@ test('Expect unknown theme to be set to system', async () => {
 });
 
 test('should register a configuration', async () => {
-  vi.stubEnv('DEV', true);
   const appearanceInit = new AppearanceInit(configurationRegistry);
   appearanceInit.init();
 
@@ -135,17 +132,7 @@ test('should register a configuration', async () => {
   expect(configurationNode?.properties?.['preferences.navigationBarLayout']).toBeDefined();
   expect(configurationNode?.properties?.['preferences.navigationBarLayout']?.description).toBeDefined();
   expect(configurationNode?.properties?.['preferences.navigationBarLayout']?.type).toBe('string');
-  expect(configurationNode?.properties?.['preferences.navigationBarLayout']?.default).toBe('icon + title');
-});
-
-test('Icon should be default if not in dev env', () => {
-  vi.resetAllMocks();
-  vi.stubEnv('DEV', false);
-  const appearanceInit = new AppearanceInit(configurationRegistry);
-  appearanceInit.init();
-
-  expect(configurationRegistry.registerConfigurations).toBeCalled();
-  const configurationNode = vi.mocked(configurationRegistry.registerConfigurations).mock.calls[0]?.[0][0];
-
-  expect(configurationNode?.properties?.['preferences.navigationBarLayout']?.default).toBe('icon');
+  expect(configurationNode?.properties?.['preferences.navigationBarLayout']?.default).toBe(
+    AppearanceSettings.IconAndTitle,
+  );
 });

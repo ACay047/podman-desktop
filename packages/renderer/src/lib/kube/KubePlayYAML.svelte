@@ -9,9 +9,10 @@ let providerUnsubscribe: Unsubscriber;
 import { faCircleCheck } from '@fortawesome/free-solid-svg-icons';
 import type { V1NamespaceList } from '@kubernetes/client-node/dist/api';
 import type { OpenDialogOptions } from '@podman-desktop/api';
-import { Button, Dropdown, ErrorMessage, Input } from '@podman-desktop/ui-svelte';
+import { Button, Checkbox, Dropdown, ErrorMessage, Input } from '@podman-desktop/ui-svelte';
 import Fa from 'svelte-fa';
 
+import ContainerConnectionDropdown from '/@/lib/forms/ContainerConnectionDropdown.svelte';
 import { handleNavigation } from '/@/navigation';
 import { NavigationPage } from '/@api/navigation-page';
 
@@ -26,6 +27,7 @@ import WarningMessage from '../ui/WarningMessage.svelte';
 let runStarted = false;
 let runFinished = false;
 let runError = '';
+let kubeBuild: boolean = false;
 let runWarning = '';
 let kubernetesYamlFilePath: string | undefined = undefined;
 let hasInvalidFields = true;
@@ -37,8 +39,8 @@ let currentNamespace: string | undefined;
 let allNamespaces: V1NamespaceList;
 
 let playKubeResultRaw: string;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let playKubeResultJSON: any;
+let playKubeResultJSON: unknown;
+let playKubeResult: { Pods?: unknown[] } | undefined = undefined;
 
 let userChoice: 'podman' | 'kubernetes' = 'podman';
 
@@ -80,7 +82,9 @@ async function playKubeFile(): Promise<void> {
     // depending on the user choice, do podman or kubernetes
     if (userChoice === 'podman') {
       try {
-        const result = await window.playKube(kubernetesYamlFilePath, selectedProvider);
+        const result = await window.playKube(kubernetesYamlFilePath, selectedProvider, {
+          build: kubeBuild,
+        });
 
         // remove the null values from the result
         playKubeResultRaw = JSON.stringify(removeEmptyOrNull(result), undefined, 2);
@@ -89,19 +93,35 @@ async function playKubeFile(): Promise<void> {
         // If there are container errors, that means that it was *able* to create the container
         // but if failed to start. We will add this to the "warning" section as we were able to create the
         // We add this with comma deliminated errors
-        if (playKubeResultJSON.Pods.length > 0) {
-          // Filter out the pods that have container errors, but check to see that container errors exists first
-          const containerErrors = playKubeResultJSON.Pods.filter(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (pod: any) => pod.ContainerErrors && pod.ContainerErrors.length > 0,
-          );
+        if (playKubeResultJSON && typeof playKubeResultJSON === 'object') {
+          playKubeResult = {};
+          if (
+            'Pods' in playKubeResultJSON &&
+            playKubeResultJSON.Pods !== undefined &&
+            Array.isArray(playKubeResultJSON.Pods) &&
+            playKubeResultJSON.Pods.length > 0
+          ) {
+            playKubeResult.Pods = playKubeResultJSON.Pods;
+            // Filter out the pods that have container errors, but check to see that container errors exists first
+            const containerErrors = playKubeResultJSON.Pods.filter(
+              (pod: unknown) =>
+                pod &&
+                typeof pod === 'object' &&
+                'ContainerErrors' in pod &&
+                Array.isArray(pod.ContainerErrors) &&
+                pod.ContainerErrors.length > 0,
+            );
 
-          // For each Pod that has container errors, we will add the container errors to the warning message
-          if (containerErrors.length > 0) {
-            runWarning = `The following pods were created but failed to start: ${containerErrors
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .map((pod: any) => pod.ContainerErrors.join(', '))
-              .join(', ')}`;
+            // For each Pod that has container errors, we will add the container errors to the warning message
+            if (containerErrors.length > 0) {
+              runWarning = `The following pods were created but failed to start: ${containerErrors
+                .map((pod: unknown) =>
+                  pod && typeof pod === 'object' && 'ContainerErrors' in pod && Array.isArray(pod.ContainerErrors)
+                    ? pod.ContainerErrors.join(', ')
+                    : '',
+                )
+                .join(', ')}`;
+            }
           }
         }
 
@@ -164,7 +184,7 @@ onDestroy(() => {
 function goBackToPodsPage(): void {
   // redirect to the pods page
   handleNavigation({
-    page: NavigationPage.PODS,
+    page: NavigationPage.PODMAN_PODS,
   });
 }
 </script>
@@ -191,6 +211,10 @@ function goBackToPodsPage(): void {
           options={kubeFileDialogOptions}
           class="w-full p-2" />
       </div>
+
+      <Checkbox class="mx-1 my-auto" title="Enable build" bind:checked={kubeBuild} >
+        <div>Enable build</div>
+      </Checkbox>
 
       <div class="text-base font-bold text-[var(--pd-content-card-header-text)]">Runtime</div>
 
@@ -228,15 +252,12 @@ function goBackToPodsPage(): void {
                 class:text-[var(--pd-content-card-header-text)]={userChoice === 'podman'}
                 class:text-[var(--pd-input-field-disabled-text)]={userChoice !== 'podman'}
                 >Container Engine</label>
-                <Dropdown
-                  name="providerChoice"
-                  bind:value={selectedProvider}
-                  disabled={userChoice === 'kubernetes'}
-                  options={providerConnections.map(providerConnection => ({
-                    label: providerConnection.name,
-                    value: providerConnection,
-                  }))}>
-                </Dropdown>
+              <ContainerConnectionDropdown
+                id="providerChoice"
+                name="providerChoice"
+                bind:value={selectedProvider}
+                disabled={userChoice === 'kubernetes'}
+                connections={providerConnections}/>
             {/if}
             {#if providerConnections.length === 1 && selectedProviderConnection}
               <input type="hidden" name="providerChoice" readonly bind:value={selectedProviderConnection.name} />
@@ -334,12 +355,12 @@ function goBackToPodsPage(): void {
         <ErrorMessage class="text-sm" error={runError} />
       {/if}
 
-      {#if playKubeResultJSON}
+      {#if playKubeResult}
         <!-- Output area similar to DeployPodToKube.svelte -->
         <div class="bg-[var(--pd--content-card-bg)] p-5 my-4 text-[var(--pd-content-card-text)]">
           <div class="flex flex-row items-center">
             <div>
-              {#if playKubeResultJSON?.Pods.length > 1}
+              {#if playKubeResult.Pods && playKubeResult.Pods.length > 1}
                 Created pods:
               {:else}
                 Created pod:

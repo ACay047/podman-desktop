@@ -1,5 +1,5 @@
 /**********************************************************************
- * Copyright (C) 2024 Red Hat, Inc.
+ * Copyright (C) 2024-2025 Red Hat, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,6 @@ const fakePod: PodInfoUI = {
       Status: 'running',
     },
   ],
-  kind: 'podman',
 };
 
 // Test render PodmanPodDetailsSummary with the PodInfoUI object
@@ -56,8 +55,11 @@ test('PodmanPodDetailsSummary renders with PodInfoUI object', async () => {
 
   // Check that the rendered text is correct
   expect(screen.getByText('pod1')).toBeInTheDocument();
+  expect(screen.getByText('fakePodId')).toBeInTheDocument();
   expect(screen.getByText('3 days')).toBeInTheDocument();
+  expect(screen.getByText('fakeCId1')).toBeInTheDocument();
   expect(screen.getByText('fakeContainer1')).toBeInTheDocument();
+  expect(screen.getByText('fakeCId2')).toBeInTheDocument();
   expect(screen.getByText('fakeContainer2')).toBeInTheDocument();
   expect(screen.getAllByText('running')[0]).toBeInTheDocument();
 });

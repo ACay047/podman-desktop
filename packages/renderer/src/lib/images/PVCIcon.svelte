@@ -10,6 +10,7 @@ export let solid = false;
   style={$$props.style}
   viewBox="0.926 0.926 15.999999 15.999999"
   version="1.1"
+  aria-label="PersistentVolumeClaim"
   xml:space="preserve"
   xmlns="http://www.w3.org/2000/svg"
   xmlns:xlink="http://www.w3.org/1999/xlink">

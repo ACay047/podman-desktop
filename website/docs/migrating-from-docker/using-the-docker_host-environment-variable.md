@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 6
 title: Using the `DOCKER_HOST` environment variable
 description: Using the `DOCKER_HOST` environment variable can make it easier to migrate from Docker to Podman Desktop, as it allows you to continue using familiar Docker commands while taking advantage of the benefits of Podman.
 keywords: [podman desktop, podman, containers, docker_host, environment, variable]
@@ -25,7 +25,7 @@ Alternatively, you can add a `podman` context by using the `docker context creat
 
 - For example, set the value of the context in this pattern on a macOS machine:
 
-  `docker context create podman --docker "host=unix://$HOME.local/share/containers/podman/machine/podman.sock"`
+  `docker context create podman --docker "host=unix://${HOME}/.local/share/containers/podman/machine/podman.sock"`
 
   Where, the path specified after the `unix://` scheme denotes the `DOCKER_HOST` value.
 
@@ -89,7 +89,7 @@ Setting the `DOCKER_HOST` environment variable isn't necessary on Windows becaus
 </TabItem>
 <TabItem value="mac" label="macOS">
 
-1. Identify the location of your Podman socket
+1. Identify the location of your Podman socket.
 
 ```shell-session
 $ podman machine inspect --format '{{.ConnectionInfo.PodmanSocket.Path}}'
@@ -104,7 +104,7 @@ $ export DOCKER_HOST=unix://<your_podman_socket_location>
 </TabItem>
 <TabItem value="linux" label="Linux">
 
-1. Identify the location of your Podman socket
+1. Identify the location of your Podman socket.
 
 ```shell-session
 $ podman info --format '{{.Host.RemoteSocket.Path}}'
